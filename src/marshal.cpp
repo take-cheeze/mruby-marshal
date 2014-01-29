@@ -33,7 +33,7 @@ struct utility {
 
     while(true) {
       while(*p and *p != ':') ++p;
-      ret = mrb_class_ptr(mrb_mod_cv_get(M, ret, mrb_intern2(M, begin, p - begin)));
+      ret = mrb_class_ptr(mrb_mod_cv_get(M, ret, mrb_intern(M, begin, p - begin)));
 
       if(!(*p)) { break; }
 
@@ -55,7 +55,7 @@ struct write_context : public utility {
   RClass* const regexp_class;
 
   write_context& byte(uint8_t const v) {
-    char const buf[] = {v};
+    char const buf[] = {char(v)};
     return mrb_str_buf_cat(M, out, buf, sizeof(buf)), *this;
   }
 
@@ -74,8 +74,8 @@ struct write_context : public utility {
   write_context& version() {
     RClass* const mod = mrb_class_get(M, "Marshal");
     return
-        byte(mrb_fixnum(mrb_mod_cv_get(M, mod, mrb_intern2(M, "MAJOR_VERSION", 13)))).
-        byte(mrb_fixnum(mrb_mod_cv_get(M, mod, mrb_intern2(M, "MINOR_VERSION", 13))));
+        byte(mrb_fixnum(mrb_mod_cv_get(M, mod, mrb_intern_lit(M, "MAJOR_VERSION")))).
+        byte(mrb_fixnum(mrb_mod_cv_get(M, mod, mrb_intern_lit(M, "MINOR_VERSION"))));
   }
 
   template<char T>
@@ -128,7 +128,7 @@ struct write_context : public utility {
 
   bool is_struct(mrb_value const& v) const {
     return mrb_array_p(v) and
-        mrb_const_defined_at(M, mrb_class(M, v), mrb_intern2(M, "__members__", 11));
+        mrb_const_defined_at(M, mrb_class(M, v), mrb_intern_lit(M, "__members__"));
   }
 
   write_context& link(int const l) {
@@ -146,7 +146,7 @@ struct write_context : public utility {
     RClass* cls = mrb_class(M, v);
 
     while(cls->tt == MRB_TT_ICLASS) {
-      tag<'e'>().symbol(mrb_intern(M, mrb_class_name(M, cls->c)));
+      tag<'e'>().symbol(mrb_intern_cstr(M, mrb_class_name(M, cls->c)));
       cls = cls->super;
     }
     return *this;
@@ -190,12 +190,12 @@ write_context& write_context::marshal(mrb_value const& v) {
   mrb_ary_push(M, objects, v);
 
   // check marshal_dump
-  if(mrb_obj_respond_to(cls, mrb_intern2(M, "marshal_dump", 12))) {
+  if(mrb_obj_respond_to(M, cls, mrb_intern_lit(M, "marshal_dump"))) {
     return klass<'U'>(v, false).class_symbol(cls)
         .marshal(mrb_funcall(M, v, "_dump", 1, mrb_nil_value()));
   }
   // check _dump
-  if(mrb_obj_respond_to(cls, mrb_intern2(M, "_dump", 5))) {
+  if(mrb_obj_respond_to(M, cls, mrb_intern_lit(M, "_dump"))) {
     // TODO: dump instance variables
     return klass<'u'>(v, false).class_symbol(cls)
         .string(mrb_funcall(M, v, "_dump", 1, mrb_nil_value()));
@@ -207,7 +207,7 @@ write_context& write_context::marshal(mrb_value const& v) {
 
   if(cls == regexp_class) {
     uclass(v, regexp_class).tag<'/'>().string(mrb_funcall(M, v, "source", 0));
-    if(mrb_obj_respond_to(cls, mrb_intern2(M, "options", 7))) {
+    if(mrb_obj_respond_to(M, cls, mrb_intern_lit(M, "options"))) {
       byte(mrb_fixnum(mrb_funcall(M, v, "options", 0)));
     } else { byte(0); } // workaround
     return *this;
@@ -244,7 +244,7 @@ write_context& write_context::marshal(mrb_value const& v) {
         uclass(v, M->hash_class);
 
         // TODO: check proc default
-        mrb_value const default_val = mrb_iv_get(M, v, mrb_intern2(M, "ifnone", 6));
+        mrb_value const default_val = mrb_iv_get(M, v, mrb_intern_lit(M, "ifnone"));
         mrb_nil_p(default_val)? tag<'{'>() : tag<'}'>();
 
         mrb_value const keys = mrb_hash_keys(M, v);
@@ -257,7 +257,7 @@ write_context& write_context::marshal(mrb_value const& v) {
       } break;
 
       case MRB_TT_DATA: {
-        if(not mrb_obj_respond_to(cls, mrb_intern2(M, "_dump_data", 10))) {
+        if(not mrb_obj_respond_to(M, cls, mrb_intern_lit(M, "_dump_data"))) {
           mrb_raise(M, mrb_class_get(M, "TypeError"), "_dump_data isn't defined'");
         }
         klass<'d'>(v, true).marshal(mrb_funcall(M, v, "_dump_data", 0));
@@ -438,7 +438,7 @@ mrb_value read_context::marshal() {
       // TODO: check Regexp class is defined
       mrb_value args[] = { string(), mrb_fixnum_value(byte()) };
       ret = mrb_funcall_argv(M, mrb_obj_value(mrb_class_get(M, "Regexp")),
-                                       mrb_intern(M, "new"), 2, args);
+                                       mrb_intern_lit(M, "new"), 2, args);
       break;
     }
 
@@ -458,7 +458,7 @@ mrb_value read_context::marshal() {
         mrb_hash_set(M, ret, key, marshal());
       }
       // set default value
-      if(tag == '}') { mrb_iv_set(M, ret, mrb_intern2(M, "ifnone", 6), marshal()); }
+      if(tag == '}') { mrb_iv_set(M, ret, mrb_intern_lit(M, "ifnone"), marshal()); }
       break;
     }
 
@@ -483,7 +483,7 @@ mrb_value read_context::marshal() {
 
       // call new of struct
        ret = mrb_funcall_argv(
-          M, struct_class, mrb_intern(M, "new"), member_count, RARRAY_PTR(members));
+          M, struct_class, mrb_intern_lit(M, "new"), member_count, RARRAY_PTR(members));
        break;
     }
 
