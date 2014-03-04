@@ -8,7 +8,8 @@ def dump(v) strip_version Marshal.dump v end
 def load(v) Marshal.load("\x04\x08" + v) end
 
 def check_load_dump(obj, data)
-  dump(obj) == data and load(data) == obj
+  assert_equal data, dump(obj)
+  assert_equal obj, load(data)
 end
 
 assert('check marshal dump version') {
@@ -64,15 +65,9 @@ assert('marshal subclass of hash with instance variable') {
                   "IC:\x0eHashSubIV}\x06\"\x08val0\"\x08foo\x06:\x09@val\"\x08foo")
 }
 
-class Regexp
-  def ==(other)
-    self.source == other.source
-  end
-end
-
 assert("marshal regexp") {
   check_load_dump(/hogehoge/, "/\x0dhogehoge\x00")
-} if Object.const_defined? 'Regexp'
+} if Object.const_defined? :Regexp
 
 assert('marshal array') {
   check_load_dump ["hogehoge", :hogehoge], "[\x07\"\x0dhogehoge:\x0dhogehoge"
