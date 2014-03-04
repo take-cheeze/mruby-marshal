@@ -10,6 +10,10 @@
 #include <cstdlib>
 #include <algorithm>
 
+#ifndef MRUBY_VERSION
+#define mrb_module_get mrb_class_get
+#endif
+
 bool operator==(mrb_value const& lhs, mrb_sym const sym) {
   return mrb_symbol(lhs) == sym;
 }
@@ -72,7 +76,7 @@ struct write_context : public utility {
   }
 
   write_context& version() {
-    RClass* const mod = mrb_class_get(M, "Marshal");
+    RClass* const mod = mrb_module_get(M, "Marshal");
     return
         byte(mrb_fixnum(mrb_mod_cv_get(M, mod, mrb_intern_lit(M, "MAJOR_VERSION")))).
         byte(mrb_fixnum(mrb_mod_cv_get(M, mod, mrb_intern_lit(M, "MINOR_VERSION"))));
@@ -203,7 +207,7 @@ write_context& write_context::marshal(mrb_value const& v) {
 
   mrb_value const iv_keys = mrb_obj_instance_variables(M, v);
 
-  if(mrb_type(v) != MRB_TT_OBJECT and RARRAY_LEN(iv_keys) > 0) { tag<'I'>(); }
+  if(mrb_type(v) != MRB_TT_OBJECT and cls != regexp_class and RARRAY_LEN(iv_keys) > 0) { tag<'I'>(); }
 
   if(cls == regexp_class) {
     uclass(v, regexp_class).tag<'/'>().string(mrb_funcall(M, v, "source", 0));
@@ -516,9 +520,6 @@ mrb_value read_context::marshal() {
   assert(not mrb_nil_p(ret));
   return ret;
 }
-
-#undef register_object_id
-#undef push_object_id
 
 mrb_value mrb_marshal_dump(mrb_state* M, mrb_value) {
   mrb_value obj;
