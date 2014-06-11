@@ -390,9 +390,11 @@ mrb_value read_context::marshal() {
     case 'I': { // instance variable
       ret = marshal();
       size_t const len = fixnum();
+      int const ai = mrb_gc_arena_save(M);
       for(size_t i = 0; i < len; ++i) {
         mrb_sym const key = symbol();
         mrb_iv_set(M, ret, key, marshal());
+        mrb_gc_arena_restore(M, ai);
       }
       return ret;
     }
@@ -428,9 +430,11 @@ mrb_value read_context::marshal() {
       ret = mrb_obj_value(mrb_obj_alloc(
           M, MRB_TT_OBJECT, mrb_class_get(M, mrb_sym2name(M, symbol()))));
       size_t const len = fixnum();
+      int const ai = mrb_gc_arena_save(M);
       for(size_t i = 0; i < len; ++i) {
         mrb_sym const key = symbol();
         mrb_iv_set(M, ret, key, marshal());
+        mrb_gc_arena_restore(M, ai);
       }
       break;
     }
@@ -454,7 +458,11 @@ mrb_value read_context::marshal() {
     case '[': { // array
       size_t const len = fixnum();
       ret = mrb_ary_new_capa(M, len);
-      for(size_t i = 0; i < len; ++i) { mrb_ary_push(M, ret, marshal()); }
+      int const ai = mrb_gc_arena_save(M);
+      for(size_t i = 0; i < len; ++i) {
+        mrb_ary_push(M, ret, marshal());
+        mrb_gc_arena_restore(M, ai);
+      }
       break;
     }
 
@@ -462,9 +470,11 @@ mrb_value read_context::marshal() {
     case '}': { // hash with default value
       size_t const len = fixnum();
       ret = mrb_hash_new_capa(M, len);
+      int const ai = mrb_gc_arena_save(M);
       for(size_t i = 0; i < len; ++i) {
         mrb_value const key = marshal();
         mrb_hash_set(M, ret, key, marshal());
+        mrb_gc_arena_restore(M, ai);
       }
       // set default value
       if(tag == '}') { mrb_iv_set(M, ret, mrb_intern_lit(M, "ifnone"), marshal()); }
@@ -479,9 +489,11 @@ mrb_value read_context::marshal() {
       mrb_value const symbols = mrb_ary_new_capa(M, member_count);
       mrb_value const members = mrb_ary_new_capa(M, member_count);
 
+      int const ai = mrb_gc_arena_save(M);
       for(size_t i = 0; i < member_count; ++i) {
         mrb_ary_push(M, symbols, mrb_symbol_value(symbol()));
         mrb_ary_push(M, members, marshal());
+        mrb_gc_arena_restore(M, ai);
       }
 
       // TODO: define struct from symbol list if not defined
