@@ -12,6 +12,11 @@
 
 #ifndef MRUBY_VERSION
 #define mrb_module_get mrb_class_get
+#define mrb_args_int int
+#define mrb_symlen size_t
+#else
+#define mrb_args_int mrb_int
+#define mrb_symlen mrb_int
 #endif
 
 bool operator==(mrb_value const& lhs, mrb_sym const sym) {
@@ -113,7 +118,7 @@ struct write_context : public utility {
   write_context& string(char const* str)
   { return string(str, std::strlen(str)); }
   write_context& string(mrb_sym const sym) {
-    size_t len;
+    mrb_symlen len;
     char const* const str = mrb_sym2name_len(M, sym, &len);
     return string(str, len);
   }
@@ -531,7 +536,7 @@ mrb_value mrb_marshal_dump(mrb_state* M, mrb_value) {
 
 mrb_value mrb_marshal_load(mrb_state* M, mrb_value) {
   char* str;
-  int len;
+  mrb_args_int len;
   mrb_get_args(M, "s", &str, &len);
 
   read_context ctx(M, str, str + len);
