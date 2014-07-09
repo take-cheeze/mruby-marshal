@@ -24,7 +24,7 @@ bool operator==(mrb_value const& lhs, mrb_sym const sym) {
 }
 
 bool operator==(mrb_value const& lhs, mrb_value const& rhs) {
-  return mrb_voidp(lhs) == mrb_voidp(rhs) and mrb_type(lhs) == mrb_type(rhs);
+  return mrb_cptr(lhs) == mrb_cptr(rhs) and mrb_type(lhs) == mrb_type(rhs);
 }
 
 namespace {
