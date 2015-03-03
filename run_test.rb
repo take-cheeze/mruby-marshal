@@ -11,6 +11,7 @@ end
 
 MRuby::Build.new do |conf|
   toolchain :clang
+
   conf.gembox 'default'
   conf.gem File.dirname(__FILE__)
 end
