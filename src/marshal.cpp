@@ -137,7 +137,7 @@ struct write_context : public utility {
 
   bool is_struct(mrb_value const& v) const {
     return mrb_array_p(v) and
-        mrb_const_defined_at(M, mrb_class(M, v), mrb_intern_lit(M, "__members__"));
+      mrb_const_defined_at(M, mrb_obj_value(mrb_class(M, v)), mrb_intern_lit(M, "__members__"));
   }
 
   write_context& link(int const l) {
@@ -242,7 +242,7 @@ write_context& write_context::marshal(mrb_value const& v) {
         char buf[256];
         sprintf(buf, "%.16g", mrb_float(v));
         tag<'f'>().string(buf);
-      }
+      } break;
 
       case MRB_TT_ARRAY: {
         uclass(v, M->array_class).tag<'['>().fixnum(RARRAY_LEN(v));
