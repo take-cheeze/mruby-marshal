@@ -6,6 +6,7 @@
 #include <mruby/value.h>
 #include <mruby/variable.h>
 
+#include <cstring>
 #include <cassert>
 #include <cstdlib>
 #include <algorithm>
