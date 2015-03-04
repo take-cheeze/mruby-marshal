@@ -533,7 +533,8 @@ mrb_value read_context::marshal() {
 
   while(RARRAY_LEN(objects) <= id)
   { mrb_ary_push(M, objects, mrb_nil_value()); }
-  RARRAY_PTR(objects)[id] = ret;
+//  RARRAY_PTR(objects)[id] = ret;
+  mrb_ary_push(M, objects, ret); 
 
   assert(not mrb_nil_p(ret));
   return ret;
