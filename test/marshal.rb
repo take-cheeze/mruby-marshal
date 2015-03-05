@@ -82,3 +82,7 @@ assert('marshal hash with default') {
   h["hoo"] = "boo"
   check_load_dump h, "}\x06\"\x08hoo\"\x08booT"
 }
+
+assert 'marshal float' do
+  check_load_dump 1.0, "f\x061"
+end
