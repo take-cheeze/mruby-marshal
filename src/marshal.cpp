@@ -8,6 +8,7 @@
 
 #include <cassert>
 #include <cstdlib>
+#include <cstring>
 #include <algorithm>
 
 #ifndef MRUBY_VERSION
@@ -136,8 +137,7 @@ struct write_context : public utility {
   }
 
   bool is_struct(mrb_value const& v) const {
-    return mrb_array_p(v) and
-        mrb_const_defined_at(M, mrb_class(M, v), mrb_intern_lit(M, "__members__"));
+    return mrb_class_defined(M, "Struct") and mrb_obj_is_kind_of(M, v, mrb_class_get(M, "Struct"));
   }
 
   write_context& link(int const l) {
@@ -530,9 +530,7 @@ mrb_value read_context::marshal() {
       return mrb_nil_value();
   }
 
-  while(RARRAY_LEN(objects) <= id)
-  { mrb_ary_push(M, objects, mrb_nil_value()); }
-  RARRAY_PTR(objects)[id] = ret;
+  mrb_ary_set(M, objects, id, ret);
 
   assert(not mrb_nil_p(ret));
   return ret;
