@@ -86,3 +86,8 @@ assert('marshal hash with default') {
 assert 'marshal float' do
   check_load_dump 1.0, "f\x061"
 end
+
+assert 'marshal link' do
+  check_load_dump({ :a => [1.0, 2, 3, 2], :b => [4, 5, 1.0, 2, 2] },
+                  "{\a:\x06a[\tf\x061i\ai\bi\a:\x06b[\ni\ti\n@\ai\ai\a")
+end

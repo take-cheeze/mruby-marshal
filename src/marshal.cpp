@@ -362,6 +362,10 @@ struct read_context : public utility {
     }
   }
 
+  void register_link(mrb_int id, mrb_value const& v) {
+    mrb_ary_set(M, objects, id, v);
+  }
+
   mrb_value marshal();
 };
 
@@ -401,7 +405,10 @@ mrb_value read_context::marshal() {
 
     case '@': {// link
       mrb_int const id = fixnum();
-      assert(id < RARRAY_LEN(objects));
+      if (id >= RARRAY_LEN(objects) or mrb_nil_p(RARRAY_PTR(objects)[id])) {
+        mrb_raisef(M, mrb_class_get(M, "ArgumentError"), "Invalid link ID: %S (table size: %S)",
+                   mrb_fixnum_value(id), mrb_fixnum_value(RARRAY_LEN(objects)));
+      }
       return RARRAY_PTR(objects)[id];
     }
 
@@ -429,6 +436,7 @@ mrb_value read_context::marshal() {
     case 'o': { // object
       ret = mrb_obj_value(mrb_obj_alloc(
           M, MRB_TT_OBJECT, mrb_class_get(M, mrb_sym2name(M, symbol()))));
+      register_link(id, ret);
       size_t const len = fixnum();
       int const ai = mrb_gc_arena_save(M);
       for(size_t i = 0; i < len; ++i) {
@@ -441,23 +449,23 @@ mrb_value read_context::marshal() {
 
     case 'f': { // float
       mrb_value const str = string();
-      ret = mrb_float_value(M, std::strtod(RSTRING_PTR(str), NULL));
+      register_link(id, ret = mrb_float_value(M, std::strtod(RSTRING_PTR(str), NULL)));
       break;
     }
 
-    case '"': ret = string(); break; // string
+    case '"': register_link(id, ret = string()); break; // string
 
     case '/': { // regexp
       // TODO: check Regexp class is defined
       mrb_value args[] = { string(), mrb_fixnum_value(byte()) };
-      ret = mrb_funcall_argv(M, mrb_obj_value(mrb_class_get(M, "Regexp")),
-                                       mrb_intern_lit(M, "new"), 2, args);
+      register_link(id, ret = mrb_funcall_argv(M, mrb_obj_value(mrb_class_get(M, "Regexp")),
+                                               mrb_intern_lit(M, "new"), 2, args));
       break;
     }
 
     case '[': { // array
       size_t const len = fixnum();
-      ret = mrb_ary_new_capa(M, len);
+      register_link(id, ret = mrb_ary_new_capa(M, len));
       int const ai = mrb_gc_arena_save(M);
       for(size_t i = 0; i < len; ++i) {
         mrb_ary_push(M, ret, marshal());
@@ -469,7 +477,7 @@ mrb_value read_context::marshal() {
     case '{': // hash
     case '}': { // hash with default value
       size_t const len = fixnum();
-      ret = mrb_hash_new_capa(M, len);
+      register_link(id, ret = mrb_hash_new_capa(M, len));
       int const ai = mrb_gc_arena_save(M);
       for(size_t i = 0; i < len; ++i) {
         mrb_value const key = marshal();
@@ -503,24 +511,26 @@ mrb_value read_context::marshal() {
       mrb_value const struct_class = mrb_obj_value(path2class(name_cstr));
 
       // call new of struct
+      // TODO: create struct instance before members
        ret = mrb_funcall_argv(
           M, struct_class, mrb_intern_lit(M, "new"), member_count, RARRAY_PTR(members));
+       register_link(id, ret);
        break;
     }
 
     case 'M': // old format class/module
       // check class or module
-      ret = mrb_obj_value(path2class(RSTRING_PTR(string())));
+      register_link(id, ret = mrb_obj_value(path2class(RSTRING_PTR(string()))));
       break;
 
     case 'c': // class
       // check class
-      ret = mrb_obj_value(path2class(RSTRING_PTR(string())));
+      register_link(id, ret = mrb_obj_value(path2class(RSTRING_PTR(string()))));
       break;
 
     case 'm': // module
       // check module
-      ret = mrb_obj_value(path2class(RSTRING_PTR(string())));
+      register_link(id, ret = mrb_obj_value(path2class(RSTRING_PTR(string()))));
       break;
 
     case 'l': // bignum (unsupported)
@@ -530,9 +540,8 @@ mrb_value read_context::marshal() {
       return mrb_nil_value();
   }
 
-  mrb_ary_set(M, objects, id, ret);
-
   assert(not mrb_nil_p(ret));
+  assert(not mrb_nil_p(mrb_ary_ref(M, objects, id)));
   return ret;
 }
 
