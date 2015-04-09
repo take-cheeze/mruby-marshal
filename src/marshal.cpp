@@ -397,7 +397,14 @@ mrb_value read_context::marshal() {
       int const ai = mrb_gc_arena_save(M);
       for(size_t i = 0; i < len; ++i) {
         mrb_sym const key = symbol();
-        mrb_iv_set(M, ret, key, marshal());
+        mrb_int key_len;
+        char const* sym = mrb_sym2name_len(M, key, &key_len);
+
+        if (key_len == 1 and sym[0] == 'E') {
+          marshal(); // TODO: store ignored encoding
+        } else {
+          mrb_iv_set(M, ret, key, marshal());
+        }
         mrb_gc_arena_restore(M, ai);
       }
       return ret;
