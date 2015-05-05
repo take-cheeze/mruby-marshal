@@ -36,18 +36,24 @@ struct utility {
   utility(mrb_state* M) : M(M) {}
   mrb_state* M;
 
-  RClass* path2class(char const* const path) {
-    char const* begin = path;
+  RClass* path2class(mrb_sym sym) const {
+    mrb_int len;
+    char const* begin = mrb_sym2name_len(M, sym, &len);
+    return path2class(begin, len);
+  }
+
+  RClass* path2class(char const* begin, mrb_int len) const {
     char const* p = begin;
-    RClass* ret = M->object_class;
+    char const* end = begin + len;
+    struct RClass* ret = M->object_class;
 
     while(true) {
-      while(*p and *p != ':') ++p;
-      ret = mrb_class_ptr(mrb_mod_cv_get(M, ret, mrb_intern(M, begin, p - begin)));
+      while((p < end and p[0] != ':') or
+            ((p + 1) < end and p[1] != ':')) ++p;
+      ret = mrb_class_get_under(M, ret, mrb_sym2name(M, mrb_intern(M, begin, p - begin)));
 
-      if(!(*p)) { break; }
+      if(p >= end) { break; }
 
-      assert(p[0] == ':' and p[1] == ':');
       p += 2;
       begin = p;
     }
@@ -221,8 +227,12 @@ write_context& write_context::marshal(mrb_value const& v) {
     } else { byte(0); } // workaround
     return *this;
   } else if(is_struct(v)) {
-    // TODO
-    klass<'S'>(v, true);
+    mrb_value const members = mrb_iv_get(M, mrb_obj_value(mrb_class(M, v)), mrb_intern_lit(M, "__members__"));
+    klass<'S'>(v, true).fixnum(RARRAY_LEN(members));
+    for (mrb_int i = 0; i < RARRAY_LEN(members); ++i) {
+      mrb_check_type(M, RARRAY_PTR(members)[i], MRB_TT_SYMBOL);
+      symbol(mrb_symbol(RARRAY_PTR(members)[i])).marshal(RARRAY_PTR(v)[i]);
+    }
   } else if(mrb_type(v) == MRB_TT_OBJECT) {
     klass<'o'>(v, true).class_symbol(cls).fixnum(RARRAY_LEN(iv_keys));
     for(int i = 0; i < RARRAY_LEN(iv_keys); ++i) {
@@ -420,7 +430,7 @@ mrb_value read_context::marshal() {
     }
 
     case 'C': { // sub class instance variable of string, regexp, array, hash
-      RClass* const klass = path2class(mrb_sym2name(M, symbol()));
+      RClass* const klass = path2class(symbol());
       ret = marshal();
       mrb_basic_ptr(ret)->c = klass; // set class
       return ret;
@@ -428,14 +438,14 @@ mrb_value read_context::marshal() {
 
     case 'u': { // _dump / _load defined class
       mrb_sym const cls = symbol();
-      ret = mrb_funcall(M, mrb_obj_value(path2class(mrb_sym2name(M, cls))),
+      ret = mrb_funcall(M, mrb_obj_value(path2class(cls)),
                          "_load", 1, string());
       break;
     }
 
     case 'U': { // marshal_load / marshal_dump defined class
       mrb_sym const cls = symbol();
-      ret = mrb_funcall(M, mrb_obj_value(path2class(mrb_sym2name(M, cls))),
+      ret = mrb_funcall(M, mrb_obj_value(path2class(cls)),
                          "marshal_load", 1, string());
       break;
     }
@@ -497,48 +507,51 @@ mrb_value read_context::marshal() {
     }
 
     case 'S': { // struct
-      mrb_sym const name = symbol();
-      char const* const name_cstr = mrb_sym2name(M, name);
-      size_t const member_count = fixnum();
+      mrb_sym const cls_name = symbol();
+      struct RClass *cls = path2class(cls_name);
+      mrb_int const member_count = fixnum();
+
+      mrb_value const struct_symbols = mrb_iv_get(M, mrb_obj_value(cls), mrb_intern_lit(M, "__members__"));
+      mrb_check_type(M, struct_symbols, MRB_TT_ARRAY);
+      if (member_count != RARRAY_LEN(struct_symbols)) {
+        mrb_raisef(M, mrb_class_get(M, "TypeError"),
+                   "struct %S not compatible (struct size differs)", mrb_symbol_value(cls_name));
+      }
 
       mrb_value const symbols = mrb_ary_new_capa(M, member_count);
-      mrb_value const members = mrb_ary_new_capa(M, member_count);
+      mrb_value const values = mrb_ary_new_capa(M, member_count);
 
       int const ai = mrb_gc_arena_save(M);
-      for(size_t i = 0; i < member_count; ++i) {
+      for (mrb_int i = 0; i < member_count; ++i) {
         mrb_ary_push(M, symbols, mrb_symbol_value(symbol()));
-        mrb_ary_push(M, members, marshal());
+        mrb_ary_push(M, values, marshal());
         mrb_gc_arena_restore(M, ai);
       }
 
-      // TODO: define struct from symbol list if not defined
-      // if(not mrb_const_defined(M, mrb_class_get(M, "Struct"), name)) {}
+      for (mrb_int i = 0; i < member_count; ++i) {
+        mrb_value src_sym = mrb_ary_ref(M, symbols, i);
+        mrb_value dst_sym = mrb_ary_ref(M, struct_symbols, i);
+        if (not mrb_obj_eq(M, src_sym, dst_sym)) {
+          mrb_raisef(M, mrb_class_get(M, "TypeError"), "struct %S not compatible (:%S for :%S)",
+                     mrb_symbol_value(cls_name), src_sym, dst_sym);
+        }
+      }
 
-      // TODO: get struct class
-      mrb_value const struct_class = mrb_obj_value(path2class(name_cstr));
-
-      // call new of struct
-      // TODO: create struct instance before members
-       ret = mrb_funcall_argv(
-          M, struct_class, mrb_intern_lit(M, "new"), member_count, RARRAY_PTR(members));
-       register_link(id, ret);
-       break;
+      ret = mrb_funcall_argv(M, mrb_obj_value(cls), mrb_intern_lit(M, "new"), member_count, RARRAY_PTR(values));
+      register_link(id, ret);
+      break;
     }
 
     case 'M': // old format class/module
-      // check class or module
-      register_link(id, ret = mrb_obj_value(path2class(RSTRING_PTR(string()))));
-      break;
-
     case 'c': // class
+    case 'm': {// module
+      // check class or module
       // check class
-      register_link(id, ret = mrb_obj_value(path2class(RSTRING_PTR(string()))));
-      break;
-
-    case 'm': // module
       // check module
-      register_link(id, ret = mrb_obj_value(path2class(RSTRING_PTR(string()))));
+      mrb_value str = string();
+      register_link(id, ret = mrb_obj_value(path2class(RSTRING_PTR(str), RSTRING_LEN(str))));
       break;
+    }
 
     case 'l': // bignum (unsupported)
 
