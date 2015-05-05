@@ -5,6 +5,7 @@
 #include <mruby/string.h>
 #include <mruby/value.h>
 #include <mruby/variable.h>
+#include <mruby/marshal.h>
 
 #include <cassert>
 #include <cstdlib>
@@ -565,6 +566,10 @@ mrb_value read_context::marshal() {
   return ret;
 }
 
+}
+
+extern "C" {
+
 mrb_value mrb_marshal_dump(mrb_state* M, mrb_value) {
   mrb_value obj;
   mrb_get_args(M, "o", &obj);
@@ -589,9 +594,6 @@ mrb_value mrb_marshal_load(mrb_state* M, mrb_value) {
   return ctx.marshal();
 }
 
-}
-
-extern "C"
 void mrb_mruby_marshal_gem_init(mrb_state* M) {
   RClass* const mod = mrb_define_module(M, "Marshal");
 
@@ -604,5 +606,6 @@ void mrb_mruby_marshal_gem_init(mrb_state* M) {
 }
 
 
-extern "C"
 void mrb_mruby_marshal_gem_final(mrb_state*) {}
+
+}
