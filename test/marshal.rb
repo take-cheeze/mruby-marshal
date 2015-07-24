@@ -119,3 +119,15 @@ assert 'marshal Struct' do
   end
   Struct.send :remove_const, :StructTest
 end
+
+assert 'marshal user defined instance' do
+  class B
+    def initialize
+      @a = 3
+    end
+
+    attr_reader :a
+    def == o; @a == o.a end
+  end
+  check_load_dump B.new, "o:\x06B\x06:\a@ai\b"
+end
