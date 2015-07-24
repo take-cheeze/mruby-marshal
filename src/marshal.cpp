@@ -235,9 +235,10 @@ write_context& write_context::marshal(mrb_value const& v) {
       symbol(mrb_symbol(RARRAY_PTR(members)[i])).marshal(RARRAY_PTR(v)[i]);
     }
   } else if(mrb_type(v) == MRB_TT_OBJECT) {
-    klass<'o'>(v, true).class_symbol(cls).fixnum(RARRAY_LEN(iv_keys));
+    klass<'o'>(v, true).fixnum(RARRAY_LEN(iv_keys));
     for(int i = 0; i < RARRAY_LEN(iv_keys); ++i) {
-      symbol(mrb_symbol(RARRAY_PTR(iv_keys)[i])).marshal(RARRAY_PTR(iv_keys)[i]);
+      symbol(mrb_symbol(RARRAY_PTR(iv_keys)[i]))
+          .marshal(mrb_iv_get(M, v, mrb_symbol(RARRAY_PTR(iv_keys)[i])));
     }
     return *this;
   } else switch(mrb_vtype(mrb_type(v))) {
