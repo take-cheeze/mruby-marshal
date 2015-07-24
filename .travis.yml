@@ -1,7 +1,12 @@
 language: c
+addons:
+  apt:
+    packages:
+      - libonig-dev
 compiler:
   - clang
   - gcc
+sudo: false
 env:
   global:
     - MRUBY_CONFIG="../.travis_config.rb"
