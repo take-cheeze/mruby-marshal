@@ -131,3 +131,21 @@ assert 'marshal user defined instance' do
   end
   check_load_dump B.new, "o:\x06B\x06:\a@ai\b"
 end
+
+assert 'marshal class inside module' do
+  module ModTest
+    module A
+      C = 10
+
+      class B
+      end
+    end
+  end
+
+  expected = "\004\bo:\x12ModTest::A::B\x00"
+  assert_equal expected, Marshal.dump(ModTest::A::B.new)
+  assert_equal ModTest::A::B, Marshal.load(expected).class
+
+  assert_raise(TypeError) { Marshal.load "\004\bo:\x12ModTest::A::C\x00" }
+  assert_raise(ArgumentError) { Marshal.load "\004\bo:\x12ModTest::A::D\x00" }
+end

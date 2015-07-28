@@ -43,7 +43,8 @@ struct utility {
     return path2class(begin, len);
   }
 
-  RClass* path2class(char const* begin, mrb_int len) const {
+  RClass* path2class(char const* path_begin, mrb_int len) const {
+    char const* begin = path_begin;
     char const* p = begin;
     char const* end = begin + len;
     struct RClass* ret = M->object_class;
@@ -51,7 +52,19 @@ struct utility {
     while(true) {
       while((p < end and p[0] != ':') or
             ((p + 1) < end and p[1] != ':')) ++p;
-      ret = mrb_class_get_under(M, ret, mrb_sym2name(M, mrb_intern(M, begin, p - begin)));
+
+      mrb_sym const cls = mrb_intern(M, begin, p - begin);
+      if (!mrb_mod_cv_defined(M, ret, cls)) {
+        mrb_raisef(M, mrb_class_get(M, "ArgumentError"), "undefined class/module %S",
+                   mrb_str_new(M, path_begin, p - path_begin));
+      }
+
+      mrb_value const cnst = mrb_mod_cv_get(M, ret, cls);
+      if (mrb_type(cnst) != MRB_TT_CLASS &&  mrb_type(cnst) != MRB_TT_MODULE) {
+        mrb_raisef(M, mrb_class_get(M, "TypeError"), "%S does not refer to class/module",
+                   mrb_str_new(M, path_begin, p - path_begin));
+      }
+      ret = mrb_class_ptr(cnst);
 
       if(p >= end) { break; }
 
@@ -453,8 +466,7 @@ mrb_value read_context::marshal() {
     }
 
     case 'o': { // object
-      ret = mrb_obj_value(mrb_obj_alloc(
-          M, MRB_TT_OBJECT, mrb_class_get(M, mrb_sym2name(M, symbol()))));
+      ret = mrb_obj_value(mrb_obj_alloc(M, MRB_TT_OBJECT, path2class(symbol())));
       register_link(id, ret);
       size_t const len = fixnum();
       int const ai = mrb_gc_arena_save(M);
