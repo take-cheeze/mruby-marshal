@@ -579,11 +579,7 @@ mrb_value read_context::marshal() {
   return ret;
 }
 
-}
-
-extern "C" {
-
-mrb_value mrb_marshal_dump(mrb_state* M, mrb_value) {
+mrb_value marshal_dump(mrb_state* M, mrb_value) {
   mrb_value obj;
   mrb_get_args(M, "o", &obj);
 
@@ -591,7 +587,7 @@ mrb_value mrb_marshal_dump(mrb_state* M, mrb_value) {
   return ctx.version().marshal(obj).out;
 }
 
-mrb_value mrb_marshal_load(mrb_state* M, mrb_value) {
+mrb_value marshal_load(mrb_state* M, mrb_value) {
   char* str;
   mrb_args_int len;
   mrb_get_args(M, "s", &str, &len);
@@ -607,17 +603,41 @@ mrb_value mrb_marshal_load(mrb_state* M, mrb_value) {
   return ctx.marshal();
 }
 
+}
+
+extern "C" {
+
+mrb_value mrb_marshal_dump(mrb_state* M, mrb_value obj) {
+  write_context ctx(M, mrb_str_new(M, NULL, 0));
+  return ctx.version().marshal(obj).out;
+}
+
+mrb_value mrb_marshal_load(mrb_state* M, mrb_value str_obj) {
+  str_obj = mrb_str_to_str(M, str_obj);
+  char* str = RSTRING_PTR(str_obj);
+  mrb_args_int len = RSTRING_LEN(str_obj);
+
+  read_context ctx(M, str, str + len);
+
+  uint8_t const major_version = ctx.byte();
+  uint8_t const minor_version = ctx.byte();
+
+  assert(major_version == MAJOR_VERSION);
+  assert(minor_version == MINOR_VERSION);
+
+  return ctx.marshal();
+}
+
 void mrb_mruby_marshal_gem_init(mrb_state* M) {
   RClass* const mod = mrb_define_module(M, "Marshal");
 
-  mrb_define_module_function(M, mod, "load", &mrb_marshal_load, MRB_ARGS_REQ(1));
-  mrb_define_module_function(M, mod, "restore", &mrb_marshal_load, MRB_ARGS_REQ(1));
-  mrb_define_module_function(M, mod, "dump", &mrb_marshal_dump, MRB_ARGS_REQ(1));
+  mrb_define_module_function(M, mod, "load", &marshal_load, MRB_ARGS_REQ(1));
+  mrb_define_module_function(M, mod, "restore", &marshal_load, MRB_ARGS_REQ(1));
+  mrb_define_module_function(M, mod, "dump", &marshal_dump, MRB_ARGS_REQ(1));
 
   mrb_define_const(M, mod, "MAJOR_VERSION", mrb_fixnum_value(MAJOR_VERSION));
   mrb_define_const(M, mod, "MINOR_VERSION", mrb_fixnum_value(MINOR_VERSION));
 }
-
 
 void mrb_mruby_marshal_gem_final(mrb_state*) {}
 

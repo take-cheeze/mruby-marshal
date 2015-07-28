@@ -149,3 +149,9 @@ assert 'marshal class inside module' do
   assert_raise(TypeError) { Marshal.load "\004\bo:\x12ModTest::A::C\x00" }
   assert_raise(ArgumentError) { Marshal.load "\004\bo:\x12ModTest::A::D\x00" }
 end
+
+assert 'C API' do
+  test_str = "\x04\b\"\x00"
+  assert_equal test_str, Marshal.mrb_marshal_dump("")
+  assert_equal "", Marshal.mrb_marshal_load(test_str)
+end
