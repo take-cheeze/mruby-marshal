@@ -43,7 +43,8 @@ struct utility {
     return path2class(begin, len);
   }
 
-  RClass* path2class(char const* begin, mrb_int len) const {
+  RClass* path2class(char const* path_begin, mrb_int len) const {
+    char const* begin = path_begin;
     char const* p = begin;
     char const* end = begin + len;
     struct RClass* ret = M->object_class;
@@ -51,7 +52,19 @@ struct utility {
     while(true) {
       while((p < end and p[0] != ':') or
             ((p + 1) < end and p[1] != ':')) ++p;
-      ret = mrb_class_get_under(M, ret, mrb_sym2name(M, mrb_intern(M, begin, p - begin)));
+
+      mrb_sym const cls = mrb_intern(M, begin, p - begin);
+      if (!mrb_mod_cv_defined(M, ret, cls)) {
+        mrb_raisef(M, mrb_class_get(M, "ArgumentError"), "undefined class/module %S",
+                   mrb_str_new(M, path_begin, p - path_begin));
+      }
+
+      mrb_value const cnst = mrb_mod_cv_get(M, ret, cls);
+      if (mrb_type(cnst) != MRB_TT_CLASS &&  mrb_type(cnst) != MRB_TT_MODULE) {
+        mrb_raisef(M, mrb_class_get(M, "TypeError"), "%S does not refer to class/module",
+                   mrb_str_new(M, path_begin, p - path_begin));
+      }
+      ret = mrb_class_ptr(cnst);
 
       if(p >= end) { break; }
 
@@ -453,8 +466,7 @@ mrb_value read_context::marshal() {
     }
 
     case 'o': { // object
-      ret = mrb_obj_value(mrb_obj_alloc(
-          M, MRB_TT_OBJECT, mrb_class_get(M, mrb_sym2name(M, symbol()))));
+      ret = mrb_obj_value(mrb_obj_alloc(M, MRB_TT_OBJECT, path2class(symbol())));
       register_link(id, ret);
       size_t const len = fixnum();
       int const ai = mrb_gc_arena_save(M);
@@ -567,11 +579,7 @@ mrb_value read_context::marshal() {
   return ret;
 }
 
-}
-
-extern "C" {
-
-mrb_value mrb_marshal_dump(mrb_state* M, mrb_value) {
+mrb_value marshal_dump(mrb_state* M, mrb_value) {
   mrb_value obj;
   mrb_get_args(M, "o", &obj);
 
@@ -579,7 +587,7 @@ mrb_value mrb_marshal_dump(mrb_state* M, mrb_value) {
   return ctx.version().marshal(obj).out;
 }
 
-mrb_value mrb_marshal_load(mrb_state* M, mrb_value) {
+mrb_value marshal_load(mrb_state* M, mrb_value) {
   char* str;
   mrb_args_int len;
   mrb_get_args(M, "s", &str, &len);
@@ -595,17 +603,41 @@ mrb_value mrb_marshal_load(mrb_state* M, mrb_value) {
   return ctx.marshal();
 }
 
+}
+
+extern "C" {
+
+mrb_value mrb_marshal_dump(mrb_state* M, mrb_value obj) {
+  write_context ctx(M, mrb_str_new(M, NULL, 0));
+  return ctx.version().marshal(obj).out;
+}
+
+mrb_value mrb_marshal_load(mrb_state* M, mrb_value str_obj) {
+  str_obj = mrb_str_to_str(M, str_obj);
+  char* str = RSTRING_PTR(str_obj);
+  mrb_args_int len = RSTRING_LEN(str_obj);
+
+  read_context ctx(M, str, str + len);
+
+  uint8_t const major_version = ctx.byte();
+  uint8_t const minor_version = ctx.byte();
+
+  assert(major_version == MAJOR_VERSION);
+  assert(minor_version == MINOR_VERSION);
+
+  return ctx.marshal();
+}
+
 void mrb_mruby_marshal_gem_init(mrb_state* M) {
   RClass* const mod = mrb_define_module(M, "Marshal");
 
-  mrb_define_module_function(M, mod, "load", &mrb_marshal_load, MRB_ARGS_REQ(1));
-  mrb_define_module_function(M, mod, "restore", &mrb_marshal_load, MRB_ARGS_REQ(1));
-  mrb_define_module_function(M, mod, "dump", &mrb_marshal_dump, MRB_ARGS_REQ(1));
+  mrb_define_module_function(M, mod, "load", &marshal_load, MRB_ARGS_REQ(1));
+  mrb_define_module_function(M, mod, "restore", &marshal_load, MRB_ARGS_REQ(1));
+  mrb_define_module_function(M, mod, "dump", &marshal_dump, MRB_ARGS_REQ(1));
 
   mrb_define_const(M, mod, "MAJOR_VERSION", mrb_fixnum_value(MAJOR_VERSION));
   mrb_define_const(M, mod, "MINOR_VERSION", mrb_fixnum_value(MINOR_VERSION));
 }
-
 
 void mrb_mruby_marshal_gem_final(mrb_state*) {}
 
