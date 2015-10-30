@@ -220,14 +220,12 @@ write_context& write_context::marshal(mrb_value const& v) {
 
   // check marshal_dump
   if(mrb_obj_respond_to(M, cls, mrb_intern_lit(M, "marshal_dump"))) {
-    return klass<'U'>(v, false).class_symbol(cls)
-        .marshal(mrb_funcall(M, v, "_dump", 1, mrb_nil_value()));
+    return klass<'U'>(v, false).marshal(mrb_funcall(M, v, "marshal_dump", 1, mrb_nil_value()));
   }
   // check _dump
   if(mrb_obj_respond_to(M, cls, mrb_intern_lit(M, "_dump"))) {
     // TODO: dump instance variables
-    return klass<'u'>(v, false).class_symbol(cls)
-        .string(mrb_funcall(M, v, "_dump", 1, mrb_nil_value()));
+    return klass<'u'>(v, false).string(mrb_funcall(M, v, "_dump", 1, mrb_nil_value()));
   }
 
   mrb_value const iv_keys = mrb_obj_instance_variables(M, v);
@@ -455,13 +453,15 @@ mrb_value read_context::marshal() {
       mrb_sym const cls = symbol();
       ret = mrb_funcall(M, mrb_obj_value(path2class(cls)),
                          "_load", 1, string());
+      register_link(id, ret);
       break;
     }
 
     case 'U': { // marshal_load / marshal_dump defined class
       mrb_sym const cls = symbol();
       ret = mrb_funcall(M, mrb_obj_value(path2class(cls)),
-                         "marshal_load", 1, string());
+                         "marshal_load", 1, marshal());
+      register_link(id, ret);
       break;
     }
 

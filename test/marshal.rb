@@ -155,3 +155,25 @@ assert 'C API' do
   assert_equal test_str, Marshal.mrb_marshal_dump("")
   assert_equal "", Marshal.mrb_marshal_load(test_str)
 end
+
+assert 'user defined marshal method' do
+  class BinaryDumper
+    def _dump a = 0; 'test' end
+    def self._load str, a = 0
+      assert_equal 'test', str
+      BinaryDumper.new
+    end
+    def == o; o.kind_of? BinaryDumper end
+  end
+  check_load_dump BinaryDumper.new, "u:\x11BinaryDumper\ttest"
+
+  class ObjectDumper
+    def marshal_dump a = 0; 'test' end
+    def self.marshal_load str, a = 0
+      assert_equal 'test', str
+      ObjectDumper.new
+    end
+    def == o; o.kind_of? ObjectDumper end
+  end
+  check_load_dump ObjectDumper.new, "U:\x11ObjectDumper\"\ttest"
+end
