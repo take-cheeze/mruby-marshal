@@ -1,5 +1,5 @@
-#ifndef MRUBY_ARRAY_H
-#define MRUBY_ARRAY_H
+#ifndef MRUBY_MARSHAL_H
+#define MRUBY_MARSHAL_H
 
 #if defined(__cplusplus)
 extern "C" {
