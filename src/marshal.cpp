@@ -37,8 +37,14 @@ namespace {
 enum { MAJOR_VERSION = 4, MINOR_VERSION = 8, };
 
 struct utility {
-  utility(mrb_state* M) : M(M) {}
+  utility(mrb_state* M)
+      : M(M), regexp_class(mrb_class_get(M, "Regexp"))
+      , symbols(mrb_ary_new(M)), objects(mrb_ary_new(M)) {}
   mrb_state* M;
+
+  RClass* const regexp_class;
+  mrb_value const symbols; // symbol table -> array
+  mrb_value const objects; // object table -> array
 
   RClass* path2class(mrb_sym sym) const {
     mrb_int len;
@@ -79,18 +85,9 @@ struct utility {
 };
 
 struct write_context : public utility {
-  write_context(mrb_state* M, mrb_value const& str)
-      : utility(M), out(str), symbols(mrb_ary_new(M))
-      , objects(mrb_ary_new(M)), regexp_class(mrb_class_get(M, "Regexp")) {}
-
-  mrb_value const out;
-  mrb_value const symbols, objects;
-  RClass* const regexp_class;
-
-  write_context& byte(uint8_t const v) {
-    char const buf[] = {char(v)};
-    return mrb_str_buf_cat(M, out, buf, sizeof(buf)), *this;
-  }
+  write_context(mrb_state *M) : utility(M) {}
+  virtual write_context& byte(uint8_t const v) = 0;
+  virtual write_context& byte_array(char const *buf, size_t len) = 0;
 
   write_context& symbol(mrb_sym const sym) {
     size_t const len = RARRAY_LEN(symbols);
@@ -113,10 +110,7 @@ struct write_context : public utility {
   }
 
   template<char T>
-  write_context& tag() {
-    char const buf[] = {T};
-    return mrb_str_buf_cat(M, out, buf, sizeof(buf)), *this;
-  }
+  write_context& tag() { return byte(T); }
 
   write_context& fixnum(mrb_int const v) {
     if(v == 0) { return byte(0); }
@@ -132,13 +126,13 @@ struct write_context : public utility {
         if(x ==  0) { buf[0] =  i; break; }
         if(x == -1) { buf[0] = -i; break; }
       }
-      return mrb_str_buf_cat(M, out, buf, i + 1), *this;
+      return byte_array(buf, i + 1);
     }
   }
 
   write_context& string(char const* str, size_t len) {
     fixnum(len);
-    return mrb_str_buf_cat(M, out, str, len), *this;
+    return byte_array(str, len);
   }
   write_context& string(char const* str)
   { return string(str, strlen(str)); }
@@ -314,22 +308,28 @@ write_context& write_context::marshal(mrb_value const& v) {
   return *this;
 }
 
-struct read_context : public utility {
-  read_context(mrb_state* M, char const* begin, char const* end)
-      : utility(M), begin(begin), end(end), current(begin)
-      , symbols(mrb_ary_new(M)), objects(mrb_ary_new(M)) {}
+struct string_write_context : public write_context {
+  string_write_context(mrb_state* M, mrb_value const& str)
+      : write_context(M), out(str) {}
 
-  char const* const begin;
-  char const* const end;
-  char const* current;
+  mrb_value const out;
 
-  mrb_value const symbols; // symbol table -> array
-  mrb_value const objects; // object table -> array
-
-  uint8_t byte() {
-    if(current >= end) mrb_raise(M, mrb_class_get(M, "RangeError"), "read_byte error");
-    return *(current++);
+  write_context& byte(uint8_t const v) {
+    char const buf[] = {char(v)};
+    return mrb_str_buf_cat(M, out, buf, sizeof(buf)), *this;
   }
+
+  write_context& byte_array(char const *buf, size_t len) {
+    return mrb_str_buf_cat(M, out, buf, len), *this;
+  }
+};
+
+struct read_context : public utility {
+  read_context(mrb_state* M) : utility(M) {}
+
+  virtual uint8_t byte() = 0;
+  virtual void restore_byte() = 0;
+  virtual mrb_value byte_array(size_t len) = 0;
 
   void number_too_big() {
     mrb_assert(false);
@@ -361,15 +361,7 @@ struct read_context : public utility {
     }
   }
 
-  mrb_value string() {
-    size_t const len = fixnum();
-    if((current + len) > end) {
-      mrb_raise(M, mrb_class_get(M, "RangeError"), "string out of range");
-    }
-    mrb_value const ret = mrb_str_new(M, current, len);
-    current += len;
-    return ret;
-  }
+  virtual mrb_value string() { return byte_array(fixnum()); }
 
   mrb_sym symbol() {
     switch(byte()) {
@@ -413,7 +405,7 @@ mrb_value read_context::marshal() {
 
     case ':': // symbol
     case ';': // symbol link
-      --current; // restore tag
+      restore_byte(); // restore tag
       return mrb_symbol_value(symbol());
 
     case 'I': { // instance variable
@@ -581,12 +573,59 @@ mrb_value read_context::marshal() {
   return ret;
 }
 
+struct string_read_context : public read_context {
+  string_read_context(mrb_state* M, char const* begin, char const* end)
+      : read_context(M), begin(begin), end(end), current(begin) {}
+
+  char const* const begin;
+  char const* const end;
+  char const* current;
+
+  virtual uint8_t byte() {
+    if(current >= end) mrb_raise(M, mrb_class_get(M, "RangeError"), "read_byte error");
+    return *(current++);
+  }
+
+  virtual void restore_byte() { --current; }
+
+  virtual mrb_value byte_array(size_t len) {
+    if((current + len) > end) {
+      mrb_raise(M, mrb_class_get(M, "RangeError"), "string out of range");
+    }
+    mrb_value const ret = mrb_str_new(M, current, len);
+    current += len;
+    return ret;
+  }
+};
+
+struct io_read_context : public read_context {
+  io_read_context(mrb_state* M, mrb_value io)
+      : read_context(M), io(io) {}
+
+  mrb_value const io;
+
+  virtual uint8_t byte() {
+    return mrb_fixnum(mrb_funcall());
+  }
+
+  virtual void restore_byte() { --current; }
+
+  virtual mrb_value byte_array(size_t len) {
+    if((current + len) > end) {
+      mrb_raise(M, mrb_class_get(M, "RangeError"), "string out of range");
+    }
+    mrb_value const ret = mrb_str_new(M, current, len);
+    current += len;
+    return ret;
+  }
+};
+
 mrb_value marshal_dump(mrb_state* M, mrb_value) {
   mrb_value obj;
   mrb_get_args(M, "o", &obj);
 
-  write_context ctx(M, mrb_str_new(M, NULL, 0));
-  return ctx.version().marshal(obj).out;
+  string_write_context ctx(M, mrb_str_new(M, NULL, 0));
+  return ctx.version().marshal(obj), ctx.out;
 }
 
 mrb_value marshal_load(mrb_state* M, mrb_value) {
@@ -594,7 +633,7 @@ mrb_value marshal_load(mrb_state* M, mrb_value) {
   mrb_args_int len;
   mrb_get_args(M, "s", &str, &len);
 
-  read_context ctx(M, str, str + len);
+  string_read_context ctx(M, str, str + len);
 
   uint8_t const major_version = ctx.byte();
   uint8_t const minor_version = ctx.byte();
@@ -610,8 +649,8 @@ mrb_value marshal_load(mrb_state* M, mrb_value) {
 extern "C" {
 
 mrb_value mrb_marshal_dump(mrb_state* M, mrb_value obj) {
-  write_context ctx(M, mrb_str_new(M, NULL, 0));
-  return ctx.version().marshal(obj).out;
+  string_write_context ctx(M, mrb_str_new(M, NULL, 0));
+  return ctx.version().marshal(obj), ctx.out;
 }
 
 mrb_value mrb_marshal_load(mrb_state* M, mrb_value str_obj) {
@@ -619,7 +658,7 @@ mrb_value mrb_marshal_load(mrb_state* M, mrb_value str_obj) {
   char* str = RSTRING_PTR(str_obj);
   mrb_args_int len = RSTRING_LEN(str_obj);
 
-  read_context ctx(M, str, str + len);
+  string_read_context ctx(M, str, str + len);
 
   uint8_t const major_version = ctx.byte();
   uint8_t const minor_version = ctx.byte();
