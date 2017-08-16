@@ -332,6 +332,7 @@ struct read_context : public utility {
   }
 
   void number_too_big() {
+    mrb_assert(false);
   }
 
   mrb_int fixnum() {
