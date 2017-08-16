@@ -7,11 +7,6 @@
 #include <mruby/variable.h>
 #include <mruby/marshal.h>
 
-#include <cassert>
-#include <cstdlib>
-#include <cstring>
-#include <algorithm>
-
 #ifndef MRUBY_VERSION
 #define mrb_module_get mrb_class_get
 #define mrb_args_int int
@@ -22,11 +17,19 @@
 #endif
 
 bool operator==(mrb_value const& lhs, mrb_sym const sym) {
-  return mrb_symbol(lhs) == sym;
+  return mrb_symbol_p(lhs) && mrb_symbol(lhs) == sym;
+}
+
+bool operator!=(mrb_value const& lhs, mrb_sym const sym) {
+  return !mrb_symbol_p(lhs) || mrb_symbol(lhs) != sym;
 }
 
 bool operator==(mrb_value const& lhs, mrb_value const& rhs) {
   return mrb_cptr(lhs) == mrb_cptr(rhs) and mrb_type(lhs) == mrb_type(rhs);
+}
+
+bool operator!=(mrb_value const& lhs, mrb_value const& rhs) {
+  return mrb_cptr(lhs) != mrb_cptr(rhs) or mrb_type(lhs) != mrb_type(rhs);
 }
 
 namespace {
@@ -92,7 +95,8 @@ struct write_context : public utility {
   write_context& symbol(mrb_sym const sym) {
     size_t const len = RARRAY_LEN(symbols);
     mrb_value const* const begin = RARRAY_PTR(symbols);
-    mrb_value const* const ptr = std::find(begin, begin + len, sym);
+    mrb_value const* ptr = begin;
+    for (; *ptr != sym && ptr < (begin + len); ++ptr);
 
     if(ptr == begin + len) { // define real symbol if not defined
       mrb_ary_push(M, symbols, mrb_symbol_value(sym));
@@ -137,7 +141,7 @@ struct write_context : public utility {
     return mrb_str_buf_cat(M, out, str, len), *this;
   }
   write_context& string(char const* str)
-  { return string(str, std::strlen(str)); }
+  { return string(str, strlen(str)); }
   write_context& string(mrb_sym const sym) {
     mrb_symlen len;
     char const* const str = mrb_sym2name_len(M, sym, &len);
@@ -148,20 +152,12 @@ struct write_context : public utility {
 
   write_context& marshal(mrb_value const& v);
 
-  // returns -1 if not found
-  int find_link(mrb_value const& obj) const {
-    size_t const len = RARRAY_LEN(objects);
-    mrb_value const* const begin = RARRAY_PTR(objects);
-    mrb_value const* const ptr = std::find(begin, begin + len, obj);
-    return ptr == (begin + len)? -1 : (ptr - begin);
-  }
-
   bool is_struct(mrb_value const& v) const {
     return mrb_class_defined(M, "Struct") and mrb_obj_is_kind_of(M, v, mrb_class_get(M, "Struct"));
   }
 
   write_context& link(int const l) {
-    assert(l != -1);
+    mrb_assert(l != -1);
     return tag<'@'>().fixnum(l);
   }
 
@@ -201,8 +197,13 @@ write_context& write_context::marshal(mrb_value const& v) {
   if(mrb_nil_p(v)) { return tag<'0'>(); }
 
   // check for link
-  int const link = find_link(v);
-  if(link != -1) { return tag<'@'>().fixnum(link); }
+  {
+    mrb_value const *b = RARRAY_PTR(objects);
+    mrb_value const *l = b;
+    mrb_value const *e = b + RARRAY_LEN(objects);
+    for (; *l != v && l < e; ++l);
+    if (l != e) return tag<'@'>().fixnum(l - b);
+  }
 
   RClass* const cls = mrb_obj_class(M, v);
 
@@ -378,10 +379,10 @@ struct read_context : public utility {
       }
       case ';': { // get symbol from table
         mrb_int const id = fixnum();
-        assert(id < RARRAY_LEN(symbols));
+        mrb_assert(id < RARRAY_LEN(symbols));
         return mrb_symbol(RARRAY_PTR(symbols)[id]);
       }
-      default: assert(false);
+      default: mrb_assert(false);
     }
   }
 
@@ -480,7 +481,7 @@ mrb_value read_context::marshal() {
 
     case 'f': { // float
       mrb_value const str = string();
-      register_link(id, ret = mrb_float_value(M, std::strtod(RSTRING_PTR(str), NULL)));
+      register_link(id, ret = mrb_float_value(M, strtod(RSTRING_PTR(str), NULL)));
       break;
     }
 
@@ -574,8 +575,8 @@ mrb_value read_context::marshal() {
       return mrb_nil_value();
   }
 
-  assert(not mrb_nil_p(ret));
-  assert(not mrb_nil_p(mrb_ary_ref(M, objects, id)));
+  mrb_assert(not mrb_nil_p(ret));
+  mrb_assert(not mrb_nil_p(mrb_ary_ref(M, objects, id)));
   return ret;
 }
 
@@ -597,8 +598,8 @@ mrb_value marshal_load(mrb_state* M, mrb_value) {
   uint8_t const major_version = ctx.byte();
   uint8_t const minor_version = ctx.byte();
 
-  assert(major_version == MAJOR_VERSION);
-  assert(minor_version == MINOR_VERSION);
+  mrb_assert(major_version == MAJOR_VERSION);
+  mrb_assert(minor_version == MINOR_VERSION);
 
   return ctx.marshal();
 }
@@ -622,8 +623,8 @@ mrb_value mrb_marshal_load(mrb_state* M, mrb_value str_obj) {
   uint8_t const major_version = ctx.byte();
   uint8_t const minor_version = ctx.byte();
 
-  assert(major_version == MAJOR_VERSION);
-  assert(minor_version == MINOR_VERSION);
+  mrb_assert(major_version == MAJOR_VERSION);
+  mrb_assert(minor_version == MINOR_VERSION);
 
   return ctx.marshal();
 }
