@@ -7,6 +7,9 @@
 #include <mruby/variable.h>
 #include <mruby/marshal.h>
 
+#include <stdlib.h>
+#include <string.h>
+
 #ifndef MRUBY_VERSION
 #define mrb_module_get mrb_class_get
 #define mrb_args_int int
