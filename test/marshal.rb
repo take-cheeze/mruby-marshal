@@ -26,6 +26,12 @@ assert 'check marshal dump version' do
   Marshal.dump(nil) == "\x04\x080"
 end
 
+assert 'marshal limit' do
+  assert_raise(ArgumentError) do
+    Marshal.dump({"hogehoge" =>  { :hogehoge => 0 }}, 2)
+  end
+end
+
 assert('Marshal.restore') {
   Marshal.restore("\x04\x080") == nil
 }

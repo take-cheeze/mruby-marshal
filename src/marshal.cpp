@@ -85,11 +85,12 @@ struct utility {
 };
 
 struct write_context : public utility {
-  write_context(mrb_state *M, mrb_value const& out) : utility(M), out(out) {}
+  write_context(mrb_state *M, mrb_value const& out, mrb_int limit) : utility(M), out(out), limit(limit) {}
   virtual write_context& byte(uint8_t const v) = 0;
   virtual write_context& byte_array(char const *buf, size_t len) = 0;
 
   mrb_value const out;
+  mrb_int limit;
 
   write_context& symbol(mrb_sym const sym) {
     size_t const len = RARRAY_LEN(symbols);
@@ -190,6 +191,9 @@ struct write_context : public utility {
 };
 
 write_context& write_context::marshal(mrb_value const& v) {
+  if (limit == 0) { mrb_raise(M, mrb_class_get(M, "ArgumentError"), "depth limit"); }
+  if (limit > 0) { --limit; }
+
   if(mrb_nil_p(v)) { return tag<'0'>(); }
 
   // check for link
@@ -311,8 +315,8 @@ write_context& write_context::marshal(mrb_value const& v) {
 }
 
 struct string_write_context : public write_context {
-  string_write_context(mrb_state* M, mrb_value const& str)
-      : write_context(M, str) {}
+  string_write_context(mrb_state* M, mrb_value const& str, mrb_int limit)
+      : write_context(M, str, limit) {}
 
   write_context& byte(uint8_t const v) {
     char const buf[] = {v};
@@ -325,8 +329,8 @@ struct string_write_context : public write_context {
 };
 
 struct io_write_context : public write_context {
-  io_write_context(mrb_state* M, mrb_value const& out)
-      : write_context(M, out), buf(mrb_str_new(M, NULL, 0)) {}
+  io_write_context(mrb_state* M, mrb_value const& out, mrb_int limit)
+      : write_context(M, out, limit), buf(mrb_str_new(M, NULL, 0)) {}
 
   mrb_value const buf;
 
@@ -660,11 +664,17 @@ struct io_read_context : public read_context {
 
 mrb_value marshal_dump(mrb_state* M, mrb_value) {
   mrb_value obj, io = mrb_nil_value();
-  mrb_get_args(M, "o|o", &obj, &io);
+  mrb_int limit = -1;
+  mrb_int const arg_count = mrb_get_args(M, "o|oi", &obj, &io, &limit);
+
+  if (arg_count == 2 && mrb_fixnum_p(io)) {
+    limit = mrb_fixnum(io);
+    io = mrb_nil_value();
+  }
 
   return mrb_nil_p(io)?
-      string_write_context(M, mrb_str_new(M, NULL, 0)).version().marshal(obj).out:
-      io_write_context(M, io).version().marshal(obj).out;
+      string_write_context(M, mrb_str_new(M, NULL, 0), limit).version().marshal(obj).out:
+      io_write_context(M, io, limit).version().marshal(obj).out;
 }
 
 mrb_value marshal_load(mrb_state* M, mrb_value) {
@@ -682,8 +692,8 @@ extern "C" {
 
 mrb_value mrb_marshal_dump(mrb_state* M, mrb_value obj, mrb_value io) {
   return mrb_nil_p(io)?
-      string_write_context(M, mrb_str_new(M, NULL, 0)).version().marshal(obj).out:
-      io_write_context(M, io).version().marshal(obj).out;
+      string_write_context(M, mrb_str_new(M, NULL, 0), -1).version().marshal(obj).out:
+      io_write_context(M, io, -1).version().marshal(obj).out;
 }
 
 mrb_value mrb_marshal_load(mrb_state* M, mrb_value obj) {
