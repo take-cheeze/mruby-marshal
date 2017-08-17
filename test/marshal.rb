@@ -12,9 +12,25 @@ def check_load_dump(obj, data)
   assert_equal obj, load(data)
 end
 
-assert('check marshal dump version') {
+assert 'marshal io' do
+  assert_equal({"hogehoge" => :hogehoge},
+               Marshal.load(StringIO.new("\x04\x08{\x06\"\x0dhogehoge:\x0dhogehoge")))
+
+  io = StringIO.new
+  Marshal.dump({"hogehoge" => :hogehoge}, io)
+  assert_equal "\x04\x08{\x06\"\x0dhogehoge:\x0dhogehoge", io.string
+end
+
+assert 'check marshal dump version' do
+  assert_raise(TypeError) { Marshal.load("\x03\x08") }
   Marshal.dump(nil) == "\x04\x080"
-}
+end
+
+assert 'marshal limit' do
+  assert_raise(ArgumentError) do
+    Marshal.dump({"hogehoge" =>  { :hogehoge => 0 }}, 2)
+  end
+end
 
 assert('Marshal.restore') {
   Marshal.restore("\x04\x080") == nil

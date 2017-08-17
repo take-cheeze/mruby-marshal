@@ -11,6 +11,6 @@ env:
   global:
     - MRUBY_CONFIG="../.travis_config.rb"
 before_script:
-  - git clone --depth 1 -b "1.1.0" "https://github.com/mruby/mruby.git" mruby
+  - git clone --depth 1 -b "1.2.0" "https://github.com/mruby/mruby.git" mruby
 script:
   - cd mruby && ./minirake all test

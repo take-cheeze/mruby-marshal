@@ -7,10 +7,8 @@
 #include <mruby/variable.h>
 #include <mruby/marshal.h>
 
-#include <cassert>
-#include <cstdlib>
-#include <cstring>
-#include <algorithm>
+#include <stdlib.h>
+#include <string.h>
 
 #ifndef MRUBY_VERSION
 #define mrb_module_get mrb_class_get
@@ -22,11 +20,19 @@
 #endif
 
 bool operator==(mrb_value const& lhs, mrb_sym const sym) {
-  return mrb_symbol(lhs) == sym;
+  return mrb_symbol_p(lhs) && mrb_symbol(lhs) == sym;
+}
+
+bool operator!=(mrb_value const& lhs, mrb_sym const sym) {
+  return !mrb_symbol_p(lhs) || mrb_symbol(lhs) != sym;
 }
 
 bool operator==(mrb_value const& lhs, mrb_value const& rhs) {
   return mrb_cptr(lhs) == mrb_cptr(rhs) and mrb_type(lhs) == mrb_type(rhs);
+}
+
+bool operator!=(mrb_value const& lhs, mrb_value const& rhs) {
+  return mrb_cptr(lhs) != mrb_cptr(rhs) or mrb_type(lhs) != mrb_type(rhs);
 }
 
 namespace {
@@ -34,8 +40,14 @@ namespace {
 enum { MAJOR_VERSION = 4, MINOR_VERSION = 8, };
 
 struct utility {
-  utility(mrb_state* M) : M(M) {}
+  utility(mrb_state* M)
+      : M(M), regexp_class(mrb_class_get(M, "Regexp"))
+      , symbols(mrb_ary_new(M)), objects(mrb_ary_new(M)) {}
   mrb_state* M;
+
+  RClass* const regexp_class;
+  mrb_value const symbols; // symbol table -> array
+  mrb_value const objects; // object table -> array
 
   RClass* path2class(mrb_sym sym) const {
     mrb_int len;
@@ -76,23 +88,18 @@ struct utility {
 };
 
 struct write_context : public utility {
-  write_context(mrb_state* M, mrb_value const& str)
-      : utility(M), out(str), symbols(mrb_ary_new(M))
-      , objects(mrb_ary_new(M)), regexp_class(mrb_class_get(M, "Regexp")) {}
+  write_context(mrb_state *M, mrb_value const& out, mrb_int limit) : utility(M), out(out), limit(limit) {}
+  virtual write_context& byte(uint8_t const v) = 0;
+  virtual write_context& byte_array(char const *buf, size_t len) = 0;
 
   mrb_value const out;
-  mrb_value const symbols, objects;
-  RClass* const regexp_class;
-
-  write_context& byte(uint8_t const v) {
-    char const buf[] = {char(v)};
-    return mrb_str_buf_cat(M, out, buf, sizeof(buf)), *this;
-  }
+  mrb_int limit;
 
   write_context& symbol(mrb_sym const sym) {
     size_t const len = RARRAY_LEN(symbols);
     mrb_value const* const begin = RARRAY_PTR(symbols);
-    mrb_value const* const ptr = std::find(begin, begin + len, sym);
+    mrb_value const* ptr = begin;
+    for (; *ptr != sym && ptr < (begin + len); ++ptr);
 
     if(ptr == begin + len) { // define real symbol if not defined
       mrb_ary_push(M, symbols, mrb_symbol_value(sym));
@@ -109,10 +116,7 @@ struct write_context : public utility {
   }
 
   template<char T>
-  write_context& tag() {
-    char const buf[] = {T};
-    return mrb_str_buf_cat(M, out, buf, sizeof(buf)), *this;
-  }
+  write_context& tag() { return byte(T); }
 
   write_context& fixnum(mrb_int const v) {
     if(v == 0) { return byte(0); }
@@ -128,16 +132,16 @@ struct write_context : public utility {
         if(x ==  0) { buf[0] =  i; break; }
         if(x == -1) { buf[0] = -i; break; }
       }
-      return mrb_str_buf_cat(M, out, buf, i + 1), *this;
+      return byte_array(buf, i + 1);
     }
   }
 
   write_context& string(char const* str, size_t len) {
     fixnum(len);
-    return mrb_str_buf_cat(M, out, str, len), *this;
+    return byte_array(str, len);
   }
   write_context& string(char const* str)
-  { return string(str, std::strlen(str)); }
+  { return string(str, strlen(str)); }
   write_context& string(mrb_sym const sym) {
     mrb_symlen len;
     char const* const str = mrb_sym2name_len(M, sym, &len);
@@ -148,20 +152,12 @@ struct write_context : public utility {
 
   write_context& marshal(mrb_value const& v);
 
-  // returns -1 if not found
-  int find_link(mrb_value const& obj) const {
-    size_t const len = RARRAY_LEN(objects);
-    mrb_value const* const begin = RARRAY_PTR(objects);
-    mrb_value const* const ptr = std::find(begin, begin + len, obj);
-    return ptr == (begin + len)? -1 : (ptr - begin);
-  }
-
   bool is_struct(mrb_value const& v) const {
     return mrb_class_defined(M, "Struct") and mrb_obj_is_kind_of(M, v, mrb_class_get(M, "Struct"));
   }
 
   write_context& link(int const l) {
-    assert(l != -1);
+    mrb_assert(l != -1);
     return tag<'@'>().fixnum(l);
   }
 
@@ -198,11 +194,19 @@ struct write_context : public utility {
 };
 
 write_context& write_context::marshal(mrb_value const& v) {
+  if (limit == 0) { mrb_raise(M, mrb_class_get(M, "ArgumentError"), "depth limit"); }
+  if (limit > 0) { --limit; }
+
   if(mrb_nil_p(v)) { return tag<'0'>(); }
 
   // check for link
-  int const link = find_link(v);
-  if(link != -1) { return tag<'@'>().fixnum(link); }
+  {
+    mrb_value const *b = RARRAY_PTR(objects);
+    mrb_value const *l = b;
+    mrb_value const *e = b + RARRAY_LEN(objects);
+    for (; *l != v && l < e; ++l);
+    if (l != e) return tag<'@'>().fixnum(l - b);
+  }
 
   RClass* const cls = mrb_obj_class(M, v);
 
@@ -313,24 +317,62 @@ write_context& write_context::marshal(mrb_value const& v) {
   return *this;
 }
 
+struct string_write_context : public write_context {
+  string_write_context(mrb_state* M, mrb_value const& str, mrb_int limit)
+      : write_context(M, str, limit) {}
+
+  write_context& byte(uint8_t const v) {
+    char const buf[] = {v};
+    return mrb_str_buf_cat(M, out, buf, 1), *this;
+  }
+
+  write_context& byte_array(char const *buf, size_t len) {
+    return mrb_str_buf_cat(M, out, buf, len), *this;
+  }
+};
+
+struct io_write_context : public write_context {
+  io_write_context(mrb_state* M, mrb_value const& out, mrb_int limit)
+      : write_context(M, out, limit), buf(mrb_str_new(M, NULL, 0)) {}
+
+  mrb_value const buf;
+
+  write_context& byte(uint8_t const v) {
+    mrb_str_resize(M, buf, 1);
+    RSTRING_PTR(buf)[0] = v;
+    return mrb_funcall(M, out, "write", 1, buf), *this;
+  }
+
+  write_context& byte_array(char const *ary, size_t len) {
+    mrb_str_resize(M, buf, len);
+    memcpy(RSTRING_PTR(buf), ary, len);
+    return mrb_funcall(M, out, "write", 1, buf), *this;
+  }
+};
+
 struct read_context : public utility {
-  read_context(mrb_state* M, char const* begin, char const* end)
-      : utility(M), begin(begin), end(end), current(begin)
-      , symbols(mrb_ary_new(M)), objects(mrb_ary_new(M)) {}
+  read_context(mrb_state* M) : utility(M) {}
 
-  char const* const begin;
-  char const* const end;
-  char const* current;
+  virtual uint8_t byte() = 0;
+  virtual void restore_byte() = 0;
+  virtual mrb_value byte_array(size_t len) = 0;
 
-  mrb_value const symbols; // symbol table -> array
-  mrb_value const objects; // object table -> array
+  read_context& version() {
+    uint8_t const major_version = byte();
+    uint8_t const minor_version = byte();
 
-  uint8_t byte() {
-    if(current >= end) mrb_raise(M, mrb_class_get(M, "RangeError"), "read_byte error");
-    return *(current++);
+    if (major_version != MAJOR_VERSION ||
+        minor_version != MINOR_VERSION) {
+      mrb_raisef(M, mrb_class_get(M, "TypeError"), "invalid marshal version: %S.%S (expected: %S.%S)",
+                 mrb_fixnum_value(major_version), mrb_fixnum_value(minor_version),
+                 mrb_fixnum_value(MAJOR_VERSION), mrb_fixnum_value(MINOR_VERSION));
+    }
+
+    return *this;
   }
 
   void number_too_big() {
+    mrb_assert(false);
   }
 
   mrb_int fixnum() {
@@ -359,15 +401,7 @@ struct read_context : public utility {
     }
   }
 
-  mrb_value string() {
-    size_t const len = fixnum();
-    if((current + len) > end) {
-      mrb_raise(M, mrb_class_get(M, "RangeError"), "string out of range");
-    }
-    mrb_value const ret = mrb_str_new(M, current, len);
-    current += len;
-    return ret;
-  }
+  virtual mrb_value string() { return byte_array(fixnum()); }
 
   mrb_sym symbol() {
     switch(byte()) {
@@ -378,10 +412,10 @@ struct read_context : public utility {
       }
       case ';': { // get symbol from table
         mrb_int const id = fixnum();
-        assert(id < RARRAY_LEN(symbols));
+        mrb_assert(id < RARRAY_LEN(symbols));
         return mrb_symbol(RARRAY_PTR(symbols)[id]);
       }
-      default: assert(false);
+      default: mrb_assert(false);
     }
   }
 
@@ -411,7 +445,7 @@ mrb_value read_context::marshal() {
 
     case ':': // symbol
     case ';': // symbol link
-      --current; // restore tag
+      restore_byte(); // restore tag
       return mrb_symbol_value(symbol());
 
     case 'I': { // instance variable
@@ -480,7 +514,7 @@ mrb_value read_context::marshal() {
 
     case 'f': { // float
       mrb_value const str = string();
-      register_link(id, ret = mrb_float_value(M, std::strtod(RSTRING_PTR(str), NULL)));
+      register_link(id, ret = mrb_float_value(M, strtod(RSTRING_PTR(str), NULL)));
       break;
     }
 
@@ -574,58 +608,101 @@ mrb_value read_context::marshal() {
       return mrb_nil_value();
   }
 
-  assert(not mrb_nil_p(ret));
-  assert(not mrb_nil_p(mrb_ary_ref(M, objects, id)));
+  mrb_assert(not mrb_nil_p(ret));
+  mrb_assert(not mrb_nil_p(mrb_ary_ref(M, objects, id)));
   return ret;
 }
 
-mrb_value marshal_dump(mrb_state* M, mrb_value) {
-  mrb_value obj;
-  mrb_get_args(M, "o", &obj);
+struct string_read_context : public read_context {
+  string_read_context(mrb_state* M, char const* begin, size_t len)
+      : read_context(M), begin(begin), end(begin + len), current(begin) {}
 
-  write_context ctx(M, mrb_str_new(M, NULL, 0));
-  return ctx.version().marshal(obj).out;
+  char const* const begin;
+  char const* const end;
+  char const* current;
+
+  uint8_t byte() {
+    if(current >= end) mrb_raise(M, mrb_class_get(M, "RangeError"), "read_byte error");
+    return *(current++);
+  }
+
+  void restore_byte() { --current; }
+
+  mrb_value byte_array(size_t len) {
+    if((current + len) > end) {
+      mrb_raise(M, mrb_class_get(M, "RangeError"), "string out of range");
+    }
+    mrb_value const ret = mrb_str_new(M, current, len);
+    current += len;
+    return ret;
+  }
+};
+
+struct io_read_context : public read_context {
+  io_read_context(mrb_state* M, mrb_value io)
+      : read_context(M), io(io), buf(mrb_str_new(M, NULL, 0)) {}
+
+  mrb_value const io;
+  mrb_value const buf;
+
+  uint8_t byte() {
+    mrb_funcall(M, io, "read", 2, mrb_fixnum_value(1), buf);
+    return RSTRING_PTR(buf)[0];
+  }
+
+  void restore_byte() {
+    mrb_funcall(M, io, "seek", 2, mrb_fixnum_value(-1),
+                mrb_const_get(M, mrb_obj_value(mrb_class_get(M, "IO")),
+                              mrb_intern_lit(M, "SEEK_CUR")));
+  }
+
+  mrb_value byte_array(size_t len) {
+    mrb_value const ret = mrb_funcall(M, io, "read", 1, mrb_fixnum_value(len));
+    if(RSTRING_LEN(ret) < len) {
+      mrb_raise(M, mrb_class_get(M, "RangeError"), "string out of range");
+    }
+    return ret;
+  }
+};
+
+mrb_value marshal_dump(mrb_state* M, mrb_value) {
+  mrb_value obj, io = mrb_nil_value();
+  mrb_int limit = -1;
+  mrb_int const arg_count = mrb_get_args(M, "o|oi", &obj, &io, &limit);
+
+  if (arg_count == 2 && mrb_fixnum_p(io)) {
+    limit = mrb_fixnum(io);
+    io = mrb_nil_value();
+  }
+
+  return mrb_nil_p(io)?
+      string_write_context(M, mrb_str_new(M, NULL, 0), limit).version().marshal(obj).out:
+      io_write_context(M, io, limit).version().marshal(obj).out;
 }
 
 mrb_value marshal_load(mrb_state* M, mrb_value) {
-  char* str;
-  mrb_args_int len;
-  mrb_get_args(M, "s", &str, &len);
+  mrb_value obj;
+  mrb_get_args(M, "o", &obj);
 
-  read_context ctx(M, str, str + len);
-
-  uint8_t const major_version = ctx.byte();
-  uint8_t const minor_version = ctx.byte();
-
-  assert(major_version == MAJOR_VERSION);
-  assert(minor_version == MINOR_VERSION);
-
-  return ctx.marshal();
+  return mrb_string_p(obj)?
+      string_read_context(M, RSTRING_PTR(obj), RSTRING_LEN(obj)).version().marshal():
+      io_read_context(M, obj).version().marshal();
 }
 
 }
 
 extern "C" {
 
-mrb_value mrb_marshal_dump(mrb_state* M, mrb_value obj) {
-  write_context ctx(M, mrb_str_new(M, NULL, 0));
-  return ctx.version().marshal(obj).out;
+mrb_value mrb_marshal_dump(mrb_state* M, mrb_value obj, mrb_value io) {
+  return mrb_nil_p(io)?
+      string_write_context(M, mrb_str_new(M, NULL, 0), -1).version().marshal(obj).out:
+      io_write_context(M, io, -1).version().marshal(obj).out;
 }
 
-mrb_value mrb_marshal_load(mrb_state* M, mrb_value str_obj) {
-  str_obj = mrb_str_to_str(M, str_obj);
-  char* str = RSTRING_PTR(str_obj);
-  mrb_args_int len = RSTRING_LEN(str_obj);
-
-  read_context ctx(M, str, str + len);
-
-  uint8_t const major_version = ctx.byte();
-  uint8_t const minor_version = ctx.byte();
-
-  assert(major_version == MAJOR_VERSION);
-  assert(minor_version == MINOR_VERSION);
-
-  return ctx.marshal();
+mrb_value mrb_marshal_load(mrb_state* M, mrb_value obj) {
+  return mrb_string_p(obj)?
+      string_read_context(M, RSTRING_PTR(obj), RSTRING_LEN(obj)).version().marshal():
+      io_read_context(M, obj).version().marshal();
 }
 
 void mrb_mruby_marshal_gem_init(mrb_state* M) {
