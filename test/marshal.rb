@@ -27,6 +27,7 @@ assert 'check marshal dump version' do
 end
 
 assert 'marshal limit' do
+  Marshal.dump({"hogehoge" =>  { :hogehoge => 0 }}, 3)
   assert_raise(ArgumentError) do
     Marshal.dump({"hogehoge" =>  { :hogehoge => 0 }}, 2)
   end
