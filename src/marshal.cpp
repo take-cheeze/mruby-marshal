@@ -32,7 +32,7 @@ bool operator==(mrb_value const& lhs, mrb_value const& rhs) {
 }
 
 bool operator!=(mrb_value const& lhs, mrb_value const& rhs) {
-  return mrb_cptr(lhs) != mrb_cptr(rhs) or mrb_type(lhs) != mrb_type(rhs);
+  return mrb_type(lhs) != mrb_type(rhs) or mrb_cptr(lhs) != mrb_cptr(rhs);
 }
 
 namespace {
@@ -203,7 +203,7 @@ write_context& write_context::marshal(mrb_value const& v, mrb_int limit) {
     mrb_value const *b = RARRAY_PTR(objects);
     mrb_value const *l = b;
     mrb_value const *e = b + RARRAY_LEN(objects);
-    for (; *l != v && l < e; ++l);
+    for (; l < e && *l != v; ++l);
     if (l != e) return tag<'@'>().fixnum(l - b);
   }
 
