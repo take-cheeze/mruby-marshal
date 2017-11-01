@@ -98,7 +98,7 @@ struct write_context : public utility {
     size_t const len = RARRAY_LEN(symbols);
     mrb_value const* const begin = RARRAY_PTR(symbols);
     mrb_value const* ptr = begin;
-    for (; *ptr != sym && ptr < (begin + len); ++ptr);
+    for (; ptr < (begin + len) && *ptr != sym; ++ptr);
 
     if(ptr == begin + len) { // define real symbol if not defined
       mrb_ary_push(M, symbols, mrb_symbol_value(sym));
