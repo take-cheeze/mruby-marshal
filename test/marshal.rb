@@ -194,3 +194,7 @@ assert 'user defined marshal method' do
   end
   check_load_dump ObjectDumper.new, "U:\x11ObjectDumper\"\ttest"
 end
+
+assert '#21' do
+  check_load_dump [:one, :two, :three], "[\b:\bone:\btwo:\nthree"
+end
