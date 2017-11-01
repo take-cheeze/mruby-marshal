@@ -321,7 +321,7 @@ struct string_write_context : public write_context {
       : write_context(M, str) {}
 
   write_context& byte(uint8_t const v) {
-    char const buf[] = {v};
+    char const buf[] = {static_cast<char>(v)};
     return mrb_str_buf_cat(M, out, buf, 1), *this;
   }
 
@@ -657,7 +657,7 @@ struct io_read_context : public read_context {
 
   mrb_value byte_array(size_t len) {
     mrb_value const ret = mrb_funcall(M, io, "read", 1, mrb_fixnum_value(len));
-    if(RSTRING_LEN(ret) < len) {
+    if(static_cast<size_t>(RSTRING_LEN(ret)) < len) {
       mrb_raise(M, mrb_class_get(M, "RangeError"), "string out of range");
     }
     return ret;
