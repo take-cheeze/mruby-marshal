@@ -414,7 +414,9 @@ struct read_context : public utility {
         mrb_assert(id < RARRAY_LEN(symbols));
         return mrb_symbol(RARRAY_PTR(symbols)[id]);
       }
-      default: mrb_assert(false);
+      default:
+        mrb_assert(false);
+        return 0;
     }
   }
 
