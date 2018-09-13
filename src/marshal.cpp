@@ -20,6 +20,15 @@
 #define mrb_symlen mrb_int
 #endif
 
+#if MRUBY_RELEASE_MAJOR <= 1 && MRUBY_RELEASE_MINOR <= 2
+typedef struct {
+  mrb_value v;
+  mrb_int n;
+} mrb_hash_value;
+
+KHASH_DECLARE(ht, mrb_value, mrb_hash_value, TRUE)
+#endif
+
 bool operator==(mrb_value const& lhs, mrb_sym const sym) {
   return mrb_symbol_p(lhs) && mrb_symbol(lhs) == sym;
 }
