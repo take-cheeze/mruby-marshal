@@ -619,7 +619,6 @@ mrb_value read_context<In>::marshal() {
 }
 
 struct string_in {
-  string_in(string_in const&) = default;
   string_in(mrb_state* M, char const* begin, size_t len)
       : M(M), begin(begin), end(begin + len), current(begin) {}
 
@@ -646,7 +645,6 @@ struct string_in {
 };
 
 struct io_in {
-  io_in(io_in const&) = default;
   io_in(mrb_state* M, mrb_value io)
       : M(M), io(io), buf(mrb_str_new(M, NULL, 0)) {}
 
