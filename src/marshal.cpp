@@ -282,10 +282,12 @@ write_context<Out>& write_context<Out>::marshal(mrb_value const& v, mrb_int limi
         mrb_value const default_val = mrb_iv_get(M, v, mrb_intern_lit(M, "ifnone"));
         tag(mrb_nil_p(default_val)? '{' : '}');
 
-        mrb_value const keys = mrb_hash_keys(M, v);
-        fixnum(RARRAY_LEN(keys));
-        for(int i = 0; i < RARRAY_LEN(keys); ++i) {
-          marshal(RARRAY_PTR(keys)[i], limit).marshal(mrb_hash_get(M, v, RARRAY_PTR(keys)[i]), limit);
+        khash_t(ht) const * const h = RHASH_TBL(v);
+
+        fixnum(kh_size(h));
+        for(khiter_t k = kh_begin(h); k != kh_end(h); ++k) {
+          if (!kh_exist(h, k)) { continue; }
+          marshal(kh_key(h, k), limit).marshal(kh_value(h, k).v, limit);
         }
 
         if(not mrb_nil_p(default_val)) { marshal(default_val, limit); }

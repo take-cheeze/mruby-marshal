@@ -105,8 +105,9 @@ assert 'marshal float' do
 end
 
 assert 'marshal link' do
-  check_load_dump({ :a => [1.0, 2, 3, 2], :b => [4, 5, 1.0, 2, 2] },
-                  "{\a:\x06a[\tf\x061i\ai\bi\a:\x06b[\ni\ti\n@\ai\ai\a")
+  check_load_dump({ :b => [4, 5, 1.0, 2, 2, 1.0] }, "{\x06:\x06b[\vi\ti\nf\x061i\ai\a@\a")
+  # check_load_dump({ :a => [1.0, 2, 3, 2], :b => [4, 5, 1.0, 2, 2] },
+  #                 "{\a:\x06a[\tf\x061i\ai\bi\a:\x06b[\ni\ti\n@\ai\ai\a")
 end
 
 assert 'ignore encoding instance variable of string' do
