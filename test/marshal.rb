@@ -120,21 +120,21 @@ assert 'marshal Struct' do
 
   check_load_dump tmp, "S:\x17Struct::StructTest\a:\x06a:\aaa:\x06b:\abb"
   tmp = Marshal.dump tmp
-  Struct.send :remove_const, :StructTest
+  Struct.__send__ :remove_const, :StructTest
 
   # struct Struct::StructTest not compatible (struct size differs)
   assert_raise TypeError do
     Struct.new 'StructTest', :a, :b, :c
     Marshal.load tmp
   end
-  Struct.send :remove_const, :StructTest
+  Struct.__send__ :remove_const, :StructTest
 
   # struct Struct::StructTest not compatible (:b for :c)
   assert_raise TypeError do
     Struct.new 'StructTest', :a, :c
     Marshal.load tmp
   end
-  Struct.send :remove_const, :StructTest
+  Struct.__send__ :remove_const, :StructTest
 end
 
 assert 'marshal user defined instance' do

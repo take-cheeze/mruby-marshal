@@ -87,12 +87,12 @@ struct utility {
   }
 };
 
+template<class Out>
 struct write_context : public utility {
-  write_context(mrb_state *M, mrb_value const& out) : utility(M), out(out) {}
-  virtual write_context& byte(uint8_t const v) = 0;
-  virtual write_context& byte_array(char const *buf, size_t len) = 0;
+  write_context(mrb_state *M, Out out) : utility(M), out_(out) {}
 
-  mrb_value const out;
+  typedef Out out_type;
+  out_type out_;
 
   write_context& symbol(mrb_sym const sym) {
     size_t const len = RARRAY_LEN(symbols);
@@ -102,25 +102,24 @@ struct write_context : public utility {
 
     if(ptr == begin + len) { // define real symbol if not defined
       mrb_ary_push(M, symbols, mrb_symbol_value(sym));
-      return tag<':'>().string(sym);
+      return tag(':').string(sym);
     }
-    else { return tag<';'>().fixnum(ptr - begin); } // write index to symbol table
+    else { return tag(';').fixnum(ptr - begin); } // write index to symbol table
   }
 
   write_context& version() {
     RClass* const mod = mrb_module_get(M, "Marshal");
-    return
-        byte(mrb_fixnum(mrb_mod_cv_get(M, mod, mrb_intern_lit(M, "MAJOR_VERSION")))).
-        byte(mrb_fixnum(mrb_mod_cv_get(M, mod, mrb_intern_lit(M, "MINOR_VERSION"))));
+    out_.byte(mrb_fixnum(mrb_mod_cv_get(M, mod, mrb_intern_lit(M, "MAJOR_VERSION"))));
+    out_.byte(mrb_fixnum(mrb_mod_cv_get(M, mod, mrb_intern_lit(M, "MINOR_VERSION"))));
+    return *this;
   }
 
-  template<char T>
-  write_context& tag() { return byte(T); }
+  write_context& tag(char t) { out_.byte(t); return *this; }
 
   write_context& fixnum(mrb_int const v) {
-    if(v == 0) { return byte(0); }
-    else if(0 < v and v < 123) { return byte(v + 5); }
-    else if(-124 < v and v < 0) { return byte((v - 5) & 0xff); }
+    if(v == 0) { out_.byte(0); return *this; }
+    else if(0 < v and v < 123) { out_.byte(v + 5); return *this; }
+    else if(-124 < v and v < 0) { out_.byte((v - 5) & 0xff); return *this; }
     else {
       char buf[sizeof(mrb_int) + 1];
       mrb_int x = v;
@@ -131,13 +130,15 @@ struct write_context : public utility {
         if(x ==  0) { buf[0] =  i; break; }
         if(x == -1) { buf[0] = -i; break; }
       }
-      return byte_array(buf, i + 1);
+      out_.byte_array(buf, i + 1);
+      return *this;
     }
   }
 
   write_context& string(char const* str, size_t len) {
     fixnum(len);
-    return byte_array(str, len);
+    out_.byte_array(str, len);
+    return *this;
   }
   write_context& string(char const* str)
   { return string(str, strlen(str)); }
@@ -157,7 +158,7 @@ struct write_context : public utility {
 
   write_context& link(int const l) {
     mrb_assert(l != -1);
-    return tag<'@'>().fixnum(l);
+    return tag('@').fixnum(l);
   }
 
   write_context& class_symbol(RClass* const v) {
@@ -170,7 +171,7 @@ struct write_context : public utility {
     RClass* cls = mrb_class(M, v);
 
     while(cls->tt == MRB_TT_ICLASS) {
-      tag<'e'>().symbol(mrb_intern_cstr(M, mrb_class_name(M, cls->c)));
+      tag('e').symbol(mrb_intern_cstr(M, mrb_class_name(M, cls->c)));
       cls = cls->super;
     }
     return *this;
@@ -179,24 +180,23 @@ struct write_context : public utility {
   write_context& uclass(mrb_value const& v, RClass* const super) {
     extended(v, true);
     RClass* const real_class = mrb_class_real(mrb_class(M, v));
-    if(real_class != super) { tag<'C'>().class_symbol(real_class); }
+    if(real_class != super) { tag('C').class_symbol(real_class); }
     return *this;
   }
 
-  template<char Tag>
-  write_context& klass(mrb_value const& v, bool const check) {
+  write_context& klass(char t, mrb_value const& v, bool const check) {
     // TODO: compat table
 
-    return extended(v, check)
-        .tag<Tag>().class_symbol(mrb_class_real(mrb_class(M, v)));
+    return extended(v, check).tag(t).class_symbol(mrb_class_real(mrb_class(M, v)));
   }
 };
 
-write_context& write_context::marshal(mrb_value const& v, mrb_int limit) {
+template<class Out>
+write_context<Out>& write_context<Out>::marshal(mrb_value const& v, mrb_int limit) {
   if (limit == 0) { mrb_raise(M, mrb_class_get(M, "ArgumentError"), "depth limit"); }
   --limit;
 
-  if(mrb_nil_p(v)) { return tag<'0'>(); }
+  if(mrb_nil_p(v)) { return tag('0'); }
 
   // check for link
   {
@@ -204,16 +204,16 @@ write_context& write_context::marshal(mrb_value const& v, mrb_int limit) {
     mrb_value const *l = b;
     mrb_value const *e = b + RARRAY_LEN(objects);
     for (; l < e && *l != v; ++l);
-    if (l != e) return tag<'@'>().fixnum(l - b);
+    if (l != e) return tag('@').fixnum(l - b);
   }
 
   RClass* const cls = mrb_obj_class(M, v);
 
   // basic types without instance variables
   switch(mrb_vtype(mrb_type(v))) {
-    case MRB_TT_FALSE: return tag<'F'>();
-    case MRB_TT_TRUE : return tag<'T'>();
-    case MRB_TT_FIXNUM: return tag<'i'>().fixnum(mrb_fixnum(v));
+    case MRB_TT_FALSE: return tag('F');
+    case MRB_TT_TRUE : return tag('T');
+    case MRB_TT_FIXNUM: return tag('i').fixnum(mrb_fixnum(v));
     case MRB_TT_SYMBOL: return symbol(mrb_symbol(v));
 
     default: break;
@@ -223,55 +223,55 @@ write_context& write_context::marshal(mrb_value const& v, mrb_int limit) {
 
   // check marshal_dump
   if(mrb_obj_respond_to(M, cls, mrb_intern_lit(M, "marshal_dump"))) {
-    return klass<'U'>(v, false).marshal(mrb_funcall(M, v, "marshal_dump", 1, mrb_nil_value()), limit);
+    return klass('U', v, false).marshal(mrb_funcall(M, v, "marshal_dump", 1, mrb_nil_value()), limit);
   }
   // check _dump
   if(mrb_obj_respond_to(M, cls, mrb_intern_lit(M, "_dump"))) {
     // TODO: dump instance variables
-    return klass<'u'>(v, false).string(mrb_funcall(M, v, "_dump", 1, mrb_nil_value()));
+    return klass('u', v, false).string(mrb_funcall(M, v, "_dump", 1, mrb_nil_value()));
   }
 
   mrb_value const iv_keys = mrb_obj_instance_variables(M, v);
 
-  if(mrb_type(v) != MRB_TT_OBJECT and cls != regexp_class and RARRAY_LEN(iv_keys) > 0) { tag<'I'>(); }
+  if(mrb_type(v) != MRB_TT_OBJECT and cls != regexp_class and RARRAY_LEN(iv_keys) > 0) { tag('I'); }
 
   if(cls == regexp_class) {
-    uclass(v, regexp_class).tag<'/'>().string(mrb_funcall(M, v, "source", 0));
+    uclass(v, regexp_class).tag('/').string(mrb_funcall(M, v, "source", 0));
     if(mrb_obj_respond_to(M, cls, mrb_intern_lit(M, "options"))) {
-      byte(mrb_fixnum(mrb_funcall(M, v, "options", 0)));
-    } else { byte(0); } // workaround
+      out_.byte(mrb_fixnum(mrb_funcall(M, v, "options", 0)));
+    } else { out_.byte(0); } // workaround
     return *this;
   } else if(is_struct(v)) {
     mrb_value const members = mrb_iv_get(M, mrb_obj_value(mrb_class(M, v)), mrb_intern_lit(M, "__members__"));
-    klass<'S'>(v, true).fixnum(RARRAY_LEN(members));
+    klass('S', v, true).fixnum(RARRAY_LEN(members));
     for (mrb_int i = 0; i < RARRAY_LEN(members); ++i) {
       mrb_check_type(M, RARRAY_PTR(members)[i], MRB_TT_SYMBOL);
       symbol(mrb_symbol(RARRAY_PTR(members)[i])).marshal(RARRAY_PTR(v)[i], limit);
     }
   } else if(mrb_type(v) == MRB_TT_OBJECT) {
-    klass<'o'>(v, true).fixnum(RARRAY_LEN(iv_keys));
+    klass('o', v, true).fixnum(RARRAY_LEN(iv_keys));
     for(int i = 0; i < RARRAY_LEN(iv_keys); ++i) {
       symbol(mrb_symbol(RARRAY_PTR(iv_keys)[i]))
           .marshal(mrb_iv_get(M, v, mrb_symbol(RARRAY_PTR(iv_keys)[i])), limit);
     }
     return *this;
   } else switch(mrb_vtype(mrb_type(v))) {
-      case MRB_TT_CLASS : return tag<'c'>().string(mrb_class_path(M, cls));
-      case MRB_TT_MODULE: return tag<'m'>().string(mrb_class_path(M, cls));
+      case MRB_TT_CLASS : return tag('c').string(mrb_class_path(M, cls));
+      case MRB_TT_MODULE: return tag('m').string(mrb_class_path(M, cls));
 
       case MRB_TT_STRING:
-        uclass(v, M->string_class).tag<'"'>().string(v);
+        uclass(v, M->string_class).tag('"').string(v);
         break;
 
       case MRB_TT_FLOAT: {
         // TODO: make platform independent
         char buf[256];
         sprintf(buf, "%.16g", mrb_float(v));
-        tag<'f'>().string(buf);
+        tag('f').string(buf);
       } break;
 
       case MRB_TT_ARRAY: {
-        uclass(v, M->array_class).tag<'['>().fixnum(RARRAY_LEN(v));
+        uclass(v, M->array_class).tag('[').fixnum(RARRAY_LEN(v));
         for(int i = 0; i < RARRAY_LEN(v); ++i) { marshal(RARRAY_PTR(v)[i], limit); }
       } break;
 
@@ -280,7 +280,7 @@ write_context& write_context::marshal(mrb_value const& v, mrb_int limit) {
 
         // TODO: check proc default
         mrb_value const default_val = mrb_iv_get(M, v, mrb_intern_lit(M, "ifnone"));
-        mrb_nil_p(default_val)? tag<'{'>() : tag<'}'>();
+        tag(mrb_nil_p(default_val)? '{' : '}');
 
         mrb_value const keys = mrb_hash_keys(M, v);
         fixnum(RARRAY_LEN(keys));
@@ -295,7 +295,7 @@ write_context& write_context::marshal(mrb_value const& v, mrb_int limit) {
         if(not mrb_obj_respond_to(M, cls, mrb_intern_lit(M, "_dump_data"))) {
           mrb_raise(M, mrb_class_get(M, "TypeError"), "_dump_data isn't defined'");
         }
-        klass<'d'>(v, true).marshal(mrb_funcall(M, v, "_dump_data", 0), limit);
+        klass('d', v, true).marshal(mrb_funcall(M, v, "_dump_data", 0), limit);
       } break;
 
 
@@ -316,49 +316,52 @@ write_context& write_context::marshal(mrb_value const& v, mrb_int limit) {
   return *this;
 }
 
-struct string_write_context : public write_context {
-  string_write_context(mrb_state* M, mrb_value const& str)
-      : write_context(M, str) {}
+struct string_out {
+  string_out(mrb_state* M, mrb_value const& str) : M(M), out(str) {}
 
-  write_context& byte(uint8_t const v) {
+  mrb_state * const M;
+  mrb_value out;
+
+  void byte(uint8_t const v) {
     char const buf[] = {static_cast<char>(v)};
-    return mrb_str_buf_cat(M, out, buf, 1), *this;
+    mrb_str_buf_cat(M, out, buf, 1);
   }
 
-  write_context& byte_array(char const *buf, size_t len) {
-    return mrb_str_buf_cat(M, out, buf, len), *this;
+  void byte_array(char const *buf, size_t len) {
+    mrb_str_buf_cat(M, out, buf, len);
   }
 };
 
-struct io_write_context : public write_context {
-  io_write_context(mrb_state* M, mrb_value const& out)
-      : write_context(M, out), buf(mrb_str_new(M, NULL, 0)) {}
+struct io_out {
+  io_out(mrb_state* M, mrb_value const& out)
+      : M(M), out(out), buf(mrb_str_new(M, NULL, 0)) {}
 
-  mrb_value const buf;
+  mrb_state * const M;
+  mrb_value const out, buf;
 
-  write_context& byte(uint8_t const v) {
+  void byte(uint8_t const v) {
     mrb_str_resize(M, buf, 1);
     RSTRING_PTR(buf)[0] = v;
-    return mrb_funcall(M, out, "write", 1, buf), *this;
+    mrb_funcall(M, out, "write", 1, buf);
   }
 
-  write_context& byte_array(char const *ary, size_t len) {
+  void byte_array(char const *ary, size_t len) {
     mrb_str_resize(M, buf, len);
     memcpy(RSTRING_PTR(buf), ary, len);
-    return mrb_funcall(M, out, "write", 1, buf), *this;
+    mrb_funcall(M, out, "write", 1, buf);
   }
 };
 
+template<class In>
 struct read_context : public utility {
-  read_context(mrb_state* M) : utility(M) {}
+  typedef In in_type;
+  read_context(mrb_state* M, in_type in) : utility(M), in_(in) {}
 
-  virtual uint8_t byte() = 0;
-  virtual void restore_byte() = 0;
-  virtual mrb_value byte_array(size_t len) = 0;
+  in_type in_;
 
   read_context& version() {
-    uint8_t const major_version = byte();
-    uint8_t const minor_version = byte();
+    uint8_t const major_version = in_.byte();
+    uint8_t const minor_version = in_.byte();
 
     if (major_version != MAJOR_VERSION ||
         minor_version != MINOR_VERSION) {
@@ -375,7 +378,7 @@ struct read_context : public utility {
   }
 
   mrb_int fixnum() {
-    mrb_int const c = static_cast<signed char>(byte());
+    mrb_int const c = static_cast<signed char>(in_.byte());
 
     if(c == 0) return 0;
     else if(c > 0) {
@@ -383,7 +386,7 @@ struct read_context : public utility {
       if(c > int(sizeof(mrb_int))) { number_too_big(); }
       mrb_int ret = 0;
       for(mrb_int i = 0; i < c; ++i) {
-        ret |= static_cast<mrb_int>(byte()) << (8*i);
+        ret |= static_cast<mrb_int>(in_.byte()) << (8*i);
       }
       return ret;
     }
@@ -394,16 +397,16 @@ struct read_context : public utility {
       mrb_int ret = ~0;
       for(mrb_int i = 0; i < len; ++i) {
         ret &= ~(0xff << (8*i));
-        ret |= static_cast<mrb_int>(byte()) << (8*i);
+        ret |= static_cast<mrb_int>(in_.byte()) << (8*i);
       }
       return ret;
     }
   }
 
-  virtual mrb_value string() { return byte_array(fixnum()); }
+  mrb_value string() { return in_.byte_array(fixnum()); }
 
   mrb_sym symbol() {
-    switch(byte()) {
+    switch(in_.byte()) {
       case ':': {
         mrb_sym const ret = mrb_intern_str(M, string());
         mrb_ary_push(M, symbols, mrb_symbol_value(ret));
@@ -427,8 +430,9 @@ struct read_context : public utility {
   mrb_value marshal();
 };
 
-mrb_value read_context::marshal() {
-  char const tag = byte();
+template<class In>
+mrb_value read_context<In>::marshal() {
+  char const tag = in_.byte();
   mrb_int const id = RARRAY_LEN(objects);
 
   mrb_value ret = mrb_nil_value();
@@ -446,7 +450,7 @@ mrb_value read_context::marshal() {
 
     case ':': // symbol
     case ';': // symbol link
-      restore_byte(); // restore tag
+      in_.restore_byte(); // restore tag
       return mrb_symbol_value(symbol());
 
     case 'I': { // instance variable
@@ -523,7 +527,7 @@ mrb_value read_context::marshal() {
 
     case '/': { // regexp
       // TODO: check Regexp class is defined
-      mrb_value args[] = { string(), mrb_fixnum_value(byte()) };
+      mrb_value args[] = { string(), mrb_fixnum_value(in_.byte()) };
       register_link(id, ret = mrb_funcall_argv(M, mrb_obj_value(mrb_class_get(M, "Regexp")),
                                                mrb_intern_lit(M, "new"), 2, args));
       break;
@@ -614,10 +618,11 @@ mrb_value read_context::marshal() {
   return ret;
 }
 
-struct string_read_context : public read_context {
-  string_read_context(mrb_state* M, char const* begin, size_t len)
-      : read_context(M), begin(begin), end(begin + len), current(begin) {}
+struct string_in {
+  string_in(mrb_state* M, char const* begin, size_t len)
+      : M(M), begin(begin), end(begin + len), current(begin) {}
 
+  mrb_state * const M;
   char const* const begin;
   char const* const end;
   char const* current;
@@ -639,10 +644,11 @@ struct string_read_context : public read_context {
   }
 };
 
-struct io_read_context : public read_context {
-  io_read_context(mrb_state* M, mrb_value io)
-      : read_context(M), io(io), buf(mrb_str_new(M, NULL, 0)) {}
+struct io_in {
+  io_in(mrb_state* M, mrb_value io)
+      : M(M), io(io), buf(mrb_str_new(M, NULL, 0)) {}
 
+  mrb_state * const M;
   mrb_value const io;
   mrb_value const buf;
 
@@ -676,9 +682,14 @@ mrb_value marshal_dump(mrb_state* M, mrb_value) {
     io = mrb_nil_value();
   }
 
-  return mrb_nil_p(io)?
-      string_write_context(M, mrb_str_new(M, NULL, 0)).version().marshal(obj, limit).out:
-      io_write_context(M, io).version().marshal(obj, limit).out;
+  if (mrb_nil_p(io)) {
+    mrb_value const str = mrb_str_new(M, NULL, 0);
+    write_context<string_out>(M, string_out(M, str)).version().marshal(obj, limit);
+    return str;
+  } else {
+    write_context<io_out>(M, io_out(M, io)).version().marshal(obj, limit);
+    return io;
+  }
 }
 
 mrb_value marshal_load(mrb_state* M, mrb_value) {
@@ -686,8 +697,8 @@ mrb_value marshal_load(mrb_state* M, mrb_value) {
   mrb_get_args(M, "o", &obj);
 
   return mrb_string_p(obj)?
-      string_read_context(M, RSTRING_PTR(obj), RSTRING_LEN(obj)).version().marshal():
-      io_read_context(M, obj).version().marshal();
+      read_context<string_in>(M, string_in(M, RSTRING_PTR(obj), RSTRING_LEN(obj))).version().marshal():
+      read_context<io_in>(M, io_in(M, obj)).version().marshal();
 }
 
 }
@@ -695,15 +706,20 @@ mrb_value marshal_load(mrb_state* M, mrb_value) {
 extern "C" {
 
 mrb_value mrb_marshal_dump(mrb_state* M, mrb_value obj, mrb_value io) {
-  return mrb_nil_p(io)?
-      string_write_context(M, mrb_str_new(M, NULL, 0)).version().marshal(obj).out:
-      io_write_context(M, io).version().marshal(obj).out;
+  if (mrb_nil_p(io)) {
+    mrb_value const str = mrb_str_new(M, NULL, 0);
+    write_context<string_out>(M, string_out(M, str)).version().marshal(obj);
+    return str;
+  } else {
+    write_context<io_out>(M, io_out(M, io)).version().marshal(obj);
+    return io;
+  }
 }
 
 mrb_value mrb_marshal_load(mrb_state* M, mrb_value obj) {
   return mrb_string_p(obj)?
-      string_read_context(M, RSTRING_PTR(obj), RSTRING_LEN(obj)).version().marshal():
-      io_read_context(M, obj).version().marshal();
+      read_context<string_in>(M, string_in(M, RSTRING_PTR(obj), RSTRING_LEN(obj))).version().marshal():
+      read_context<io_in>(M, io_in(M, obj)).version().marshal();
 }
 
 void mrb_mruby_marshal_gem_init(mrb_state* M) {
