@@ -199,6 +199,18 @@ struct write_context : public utility {
 
     return extended(v, check).tag(t).class_symbol(mrb_class_real(mrb_class(M, v)));
   }
+
+ private:
+  struct hash_marshal_meta {
+    write_context& ctx;
+    mrb_int limit;
+  };
+
+  static int marshal_hash_each(mrb_state *mrb, mrb_value key, mrb_value val, void *meta_) {
+    hash_marshal_meta *meta = (hash_marshal_meta*)meta_;
+    meta->ctx.marshal(key, meta->limit).marshal(val, meta->limit);
+    return 0;
+  }
 };
 
 template<class Out>
@@ -292,6 +304,7 @@ write_context<Out>& write_context<Out>::marshal(mrb_value const& v, mrb_int limi
         mrb_value const default_val = mrb_iv_get(M, v, mrb_intern_lit(M, "ifnone"));
         tag(mrb_nil_p(default_val)? '{' : '}');
 
+#if MRUBY_RELEASE_MAJOR < 2
         khash_t(ht) const * const h = RHASH_TBL(v);
 
         fixnum(kh_size(h));
@@ -299,6 +312,11 @@ write_context<Out>& write_context<Out>::marshal(mrb_value const& v, mrb_int limi
           if (!kh_exist(h, k)) { continue; }
           marshal(kh_key(h, k), limit).marshal(kh_value(h, k).v, limit);
         }
+#else
+        fixnum(mrb_hash_size(M, v));
+        auto meta = hash_marshal_meta{*this, limit};
+        mrb_hash_foreach(M, RHASH(v), &marshal_hash_each, &meta);
+#endif
 
         if(not mrb_nil_p(default_val)) { marshal(default_val, limit); }
       } break;
