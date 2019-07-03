@@ -5,4 +5,5 @@ MRuby::Build.new do |conf|
   enable_debug
 
   conf.gem '.'
+  conf.cxx.flags << '-std=c++11'
 end
