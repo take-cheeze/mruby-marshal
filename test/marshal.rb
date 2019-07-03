@@ -199,3 +199,19 @@ end
 assert '#21' do
   check_load_dump [:one, :two, :three], "[\b:\bone:\btwo:\nthree"
 end
+
+assert '#29' do
+  class MarshalTest
+    def initialize
+      @a = 0.1
+      @b = 0.2
+      @c = 0.3
+    end
+
+    attr_reader :a, :b, :c
+
+    def == o; self.a == o.a and self.b == o.b and self.c == o.c end
+  end
+
+  check_load_dump MarshalTest.new, "o:\x10MarshalTest\b:\a@af\b0.1:\a@bf\b0.2:\a@cf\b0.3"
+end
