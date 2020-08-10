@@ -4,6 +4,6 @@ MRuby::Build.new do |conf|
   enable_bintest
   enable_debug
 
-  conf.gem '.'
+  conf.gem "#{MRUBY_ROOT}/.."
   conf.cxx.flags << '-std=c++11'
 end
