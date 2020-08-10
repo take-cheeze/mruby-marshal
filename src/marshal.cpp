@@ -480,7 +480,7 @@ mrb_value read_context<In>::marshal() {
 
     case ':': // symbol
     case ';': // symbol link
-      in_.restore_byte(); // restore tag
+      in_.restore_byte(tag); // restore tag
       return mrb_symbol_value(symbol());
 
     case 'I': { // instance variable
@@ -662,7 +662,7 @@ struct string_in {
     return *(current++);
   }
 
-  void restore_byte() { --current; }
+  void restore_byte(char) { --current; }
 
   mrb_value byte_array(size_t len) {
     if((current + len) > end) {
@@ -683,14 +683,12 @@ struct io_in {
   mrb_value const buf;
 
   uint8_t byte() {
-    mrb_funcall(M, io, "read", 2, mrb_fixnum_value(1), buf);
+    mrb_value const buf = mrb_funcall(M, io, "getc", 0);
     return RSTRING_PTR(buf)[0];
   }
 
-  void restore_byte() {
-    mrb_funcall(M, io, "seek", 2, mrb_fixnum_value(-1),
-                mrb_const_get(M, mrb_obj_value(mrb_class_get(M, "IO")),
-                              mrb_intern_lit(M, "SEEK_CUR")));
+  void restore_byte(char c) {
+    mrb_funcall(M, io, "ungetc", 1, mrb_str_new(M, &c, 1));
   }
 
   mrb_value byte_array(size_t len) {
