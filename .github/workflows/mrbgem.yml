@@ -18,4 +18,4 @@ jobs:
     - name: download mruby
       run: git clone --depth 1 -b "2.0.1" "https://github.com/mruby/mruby.git" mruby
     - name: run test
-      run: cd mruby && MRUBY_CONFIG="../.travis_config.rb" ./minirake all test
+      run: cd mruby && MRUBY_CONFIG="../.github/workflows/config.rb" ./minirake all test
