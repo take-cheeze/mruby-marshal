@@ -304,7 +304,11 @@ write_context<Out>& write_context<Out>::marshal(mrb_value const& v, mrb_int limi
         mrb_value const default_val = mrb_iv_get(M, v, mrb_intern_lit(M, "ifnone"));
         tag(mrb_nil_p(default_val)? '{' : '}');
 
-#if MRUBY_RELEASE_MAJOR < 2
+#if MRUBY_RELEASE_MAJOR >= 2 && MRUBY_RELEASE_MINOR >= 1
+        fixnum(mrb_hash_size(M, v));
+        auto meta = hash_marshal_meta{*this, limit};
+        mrb_hash_foreach(M, RHASH(v), &marshal_hash_each, &meta);
+#else
         khash_t(ht) const * const h = RHASH_TBL(v);
 
         fixnum(kh_size(h));
@@ -312,10 +316,6 @@ write_context<Out>& write_context<Out>::marshal(mrb_value const& v, mrb_int limi
           if (!kh_exist(h, k)) { continue; }
           marshal(kh_key(h, k), limit).marshal(kh_value(h, k).v, limit);
         }
-#else
-        fixnum(mrb_hash_size(M, v));
-        auto meta = hash_marshal_meta{*this, limit};
-        mrb_hash_foreach(M, RHASH(v), &marshal_hash_each, &meta);
 #endif
 
         if(not mrb_nil_p(default_val)) { marshal(default_val, limit); }
