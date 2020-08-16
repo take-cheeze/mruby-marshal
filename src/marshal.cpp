@@ -254,6 +254,7 @@ write_context<Out>& write_context<Out>::marshal(mrb_value const& v, mrb_int limi
   }
 
   mrb_value const iv_keys = mrb_obj_instance_variables(M, v);
+  mrb_funcall(M, iv_keys, "sort!", 0);
 
   if(mrb_type(v) != MRB_TT_OBJECT and cls != regexp_class and RARRAY_LEN(iv_keys) > 0) { tag('I'); }
 
