@@ -309,12 +309,12 @@ write_context<Out>& write_context<Out>::marshal(mrb_value const& v, mrb_int limi
         auto meta = hash_marshal_meta{*this, limit};
         mrb_hash_foreach(M, RHASH(v), &marshal_hash_each, &meta);
 #else
-        khash_t(ht) const * const h = RHASH_TBL(v);
+        mrb_value const keys = mrb_hash_keys(M, v);
 
-        fixnum(kh_size(h));
-        for(khiter_t k = kh_begin(h); k != kh_end(h); ++k) {
-          if (!kh_exist(h, k)) { continue; }
-          marshal(kh_key(h, k), limit).marshal(kh_value(h, k).v, limit);
+        fixnum(RARRAY_LEN(keys));
+        for(mrb_int i = 0; i < RARRAY_LEN(keys); ++i) {
+          mrb_value const k = RARRAY_PTR(keys)[i];
+          marshal(k, limit).marshal(mrb_hash_get(M, v, k), limit);
         }
 #endif
 
