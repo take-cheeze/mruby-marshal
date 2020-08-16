@@ -254,6 +254,7 @@ write_context<Out>& write_context<Out>::marshal(mrb_value const& v, mrb_int limi
   }
 
   mrb_value const iv_keys = mrb_obj_instance_variables(M, v);
+  mrb_funcall(M, iv_keys, "sort!", 0);
 
   if(mrb_type(v) != MRB_TT_OBJECT and cls != regexp_class and RARRAY_LEN(iv_keys) > 0) { tag('I'); }
 
@@ -304,7 +305,20 @@ write_context<Out>& write_context<Out>::marshal(mrb_value const& v, mrb_int limi
         mrb_value const default_val = mrb_iv_get(M, v, mrb_intern_lit(M, "ifnone"));
         tag(mrb_nil_p(default_val)? '{' : '}');
 
-#if MRUBY_RELEASE_MAJOR < 2
+#if MRUBY_RELEASE_MAJOR >= 2 && MRUBY_RELEASE_MINOR >= 1
+        fixnum(mrb_hash_size(M, v));
+        auto meta = hash_marshal_meta{*this, limit};
+        mrb_hash_foreach(M, RHASH(v), &marshal_hash_each, &meta);
+#elif MRUBY_RELEASE_MAJOR >= 2 && MRUBY_RELEASE_MINOR >= 0
+        mrb_value const keys = mrb_hash_keys(M, v);
+        mrb_funcall(M, keys, "sort!", 0);
+
+        fixnum(RARRAY_LEN(keys));
+        for(mrb_int i = 0; i < RARRAY_LEN(keys); ++i) {
+          mrb_value const k = RARRAY_PTR(keys)[i];
+          marshal(k, limit).marshal(mrb_hash_get(M, v, k), limit);
+        }
+#else
         khash_t(ht) const * const h = RHASH_TBL(v);
 
         fixnum(kh_size(h));
@@ -312,10 +326,6 @@ write_context<Out>& write_context<Out>::marshal(mrb_value const& v, mrb_int limi
           if (!kh_exist(h, k)) { continue; }
           marshal(kh_key(h, k), limit).marshal(kh_value(h, k).v, limit);
         }
-#else
-        fixnum(mrb_hash_size(M, v));
-        auto meta = hash_marshal_meta{*this, limit};
-        mrb_hash_foreach(M, RHASH(v), &marshal_hash_each, &meta);
 #endif
 
         if(not mrb_nil_p(default_val)) { marshal(default_val, limit); }
