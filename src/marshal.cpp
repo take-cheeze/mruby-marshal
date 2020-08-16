@@ -310,6 +310,7 @@ write_context<Out>& write_context<Out>::marshal(mrb_value const& v, mrb_int limi
         mrb_hash_foreach(M, RHASH(v), &marshal_hash_each, &meta);
 #else
         mrb_value const keys = mrb_hash_keys(M, v);
+        mrb_funcall(M, keys, "sort!", 0);
 
         fixnum(RARRAY_LEN(keys));
         for(mrb_int i = 0; i < RARRAY_LEN(keys); ++i) {
