@@ -225,7 +225,7 @@ write_context<Out>& write_context<Out>::marshal(mrb_value const& v, mrb_int limi
     mrb_value const *b = RARRAY_PTR(objects);
     mrb_value const *l = b;
     mrb_value const *e = b + RARRAY_LEN(objects);
-    for (; l < e && *l != v; ++l);
+    for (; l < e && !mrb_obj_equal(M, *l, v); ++l);
     if (l != e) return tag('@').fixnum(l - b);
   }
 
