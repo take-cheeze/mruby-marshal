@@ -204,6 +204,8 @@ struct write_context : public utility {
   struct hash_marshal_meta {
     write_context& ctx;
     mrb_int limit;
+    hash_marshal_meta(write_context& ctx, mrb_int limit)
+      : ctx(ctx), limit(limit) {};
   };
 
   static int marshal_hash_each(mrb_state *mrb, mrb_value key, mrb_value val, void *meta_) {
@@ -307,7 +309,7 @@ write_context<Out>& write_context<Out>::marshal(mrb_value const& v, mrb_int limi
 
 #if MRUBY_RELEASE_MAJOR >= 2 && MRUBY_RELEASE_MINOR >= 1
         fixnum(mrb_hash_size(M, v));
-        auto meta = hash_marshal_meta{*this, limit};
+        auto meta = hash_marshal_meta(*this, limit);
         mrb_hash_foreach(M, RHASH(v), &marshal_hash_each, &meta);
 #elif MRUBY_RELEASE_MAJOR >= 2 && MRUBY_RELEASE_MINOR >= 0
         mrb_value const keys = mrb_hash_keys(M, v);
