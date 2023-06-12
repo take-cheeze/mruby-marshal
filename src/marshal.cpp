@@ -81,7 +81,7 @@ struct utility {
                    mrb_str_new(M, path_begin, p - path_begin));
       }
 
-      mrb_value const cnst = mrb_cv_get(M, ,mrb_obj_value(ret), cls);
+      mrb_value const cnst = mrb_cv_get(M, mrb_obj_value(ret), cls);
       if (mrb_type(cnst) != MRB_TT_CLASS &&  mrb_type(cnst) != MRB_TT_MODULE) {
         mrb_raisef(M, mrb_class_get(M, "TypeError"), "%S does not refer to class/module",
                    mrb_str_new(M, path_begin, p - path_begin));
