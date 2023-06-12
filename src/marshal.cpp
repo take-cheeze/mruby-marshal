@@ -29,10 +29,6 @@ typedef struct {
 KHASH_DECLARE(ht, mrb_value, mrb_hash_value, TRUE)
 #endif
 
-#if MRUBY_RELEASE_MAJOR >= 3 && MRUBY_RELEASE_MINOR >= 1
-#include <mruby/internal.h>
-#endif
-
 bool operator==(mrb_value const& lhs, mrb_sym const sym) {
   return mrb_symbol_p(lhs) && mrb_symbol(lhs) == sym;
 }
@@ -259,7 +255,7 @@ write_context<Out>& write_context<Out>::marshal(mrb_value const& v, mrb_int limi
     return klass('u', v, false).string(mrb_funcall(M, v, "_dump", 1, mrb_nil_value()));
   }
 
-  mrb_value const iv_keys = mrb_obj_instance_variables(M, v);
+  mrb_value const iv_keys = mrb_funcall(M, v, "instance_variables", 0);
   mrb_funcall(M, iv_keys, "sort!", 0);
 
   if(mrb_type(v) != MRB_TT_OBJECT and cls != regexp_class and RARRAY_LEN(iv_keys) > 0) { tag('I'); }
