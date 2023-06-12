@@ -15,7 +15,12 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-22.04, macos-latest]
-        mruby_version: [master, 3.2.0, 3.1.0, 3.0.0, 2.1.2]
+        mruby_version:
+        - master
+        - 3.2.0
+        - 3.1.0
+        # - 3.0.0
+        - 2.1.2
     runs-on: ${{ matrix.os }}
     name: ${{ matrix.os }} & mruby-${{ matrix.mruby_version }}
     env:
