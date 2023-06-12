@@ -29,6 +29,10 @@ typedef struct {
 KHASH_DECLARE(ht, mrb_value, mrb_hash_value, TRUE)
 #endif
 
+#if MRUBY_RELEASE_MAJOR >= 3 && MRUBY_RELEASE_MINOR >= 1
+#include <mruby/internal.h>
+#endif
+
 bool operator==(mrb_value const& lhs, mrb_sym const sym) {
   return mrb_symbol_p(lhs) && mrb_symbol(lhs) == sym;
 }
