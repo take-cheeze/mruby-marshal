@@ -8,6 +8,12 @@
 #include <mruby/variable.h>
 #include <mruby/marshal.h>
 
+#if MRUBY_RELEASE_MAJOR >= 3 && MRUBY_RELEASE_MINOR >= 3
+extern "C" {
+#include <mruby/internal.h>
+}
+#endif
+
 #include <stdlib.h>
 #include <string.h>
 
@@ -76,12 +82,20 @@ struct utility {
             ((p + 1) < end and p[1] != ':')) ++p;
 
       mrb_sym const cls = mrb_intern(M, begin, p - begin);
+#if MRUBY_RELEASE_MAJOR >= 3 && MRUBY_RELEASE_MINOR >= 3
+      if (!mrb_cv_defined(M, mrb_obj_value(ret), cls)) {
+#else
       if (!mrb_mod_cv_defined(M, ret, cls)) {
+#endif
         mrb_raisef(M, mrb_class_get(M, "ArgumentError"), "undefined class/module %S",
                    mrb_str_new(M, path_begin, p - path_begin));
       }
 
+#if MRUBY_RELEASE_MAJOR >= 3 && MRUBY_RELEASE_MINOR >= 3
+      mrb_value const cnst = mrb_cv_get(M, mrb_obj_value(ret), cls);
+#else
       mrb_value const cnst = mrb_mod_cv_get(M, ret, cls);
+#endif
       if (mrb_type(cnst) != MRB_TT_CLASS &&  mrb_type(cnst) != MRB_TT_MODULE) {
         mrb_raisef(M, mrb_class_get(M, "TypeError"), "%S does not refer to class/module",
                    mrb_str_new(M, path_begin, p - path_begin));
@@ -118,9 +132,15 @@ struct write_context : public utility {
   }
 
   write_context& version() {
+#if MRUBY_RELEASE_MAJOR >= 3 && MRUBY_RELEASE_MINOR >= 3
+    mrb_value const mod = mrb_obj_value(mrb_module_get(M, "Marshal"));
+    out_.byte(mrb_fixnum(mrb_cv_get(M, mod, mrb_intern_lit(M, "MAJOR_VERSION"))));
+    out_.byte(mrb_fixnum(mrb_cv_get(M, mod, mrb_intern_lit(M, "MINOR_VERSION"))));
+#else
     RClass* const mod = mrb_module_get(M, "Marshal");
     out_.byte(mrb_fixnum(mrb_mod_cv_get(M, mod, mrb_intern_lit(M, "MAJOR_VERSION"))));
     out_.byte(mrb_fixnum(mrb_mod_cv_get(M, mod, mrb_intern_lit(M, "MINOR_VERSION"))));
+#endif
     return *this;
   }
 
