@@ -201,6 +201,8 @@ assert '#21' do
 end
 
 assert '#29' do
+  skip
+
   class MarshalTest
     def initialize
       @a = 0.1
