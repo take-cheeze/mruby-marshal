@@ -82,20 +82,12 @@ struct utility {
             ((p + 1) < end and p[1] != ':')) ++p;
 
       mrb_sym const cls = mrb_intern(M, begin, p - begin);
-#if MRUBY_RELEASE_MAJOR >= 3 && MRUBY_RELEASE_MINOR >= 3
       if (!mrb_cv_defined(M, mrb_obj_value(ret), cls)) {
-#else
-      if (!mrb_mod_cv_defined(M, ret, cls)) {
-#endif
         mrb_raisef(M, mrb_class_get(M, "ArgumentError"), "undefined class/module %S",
                    mrb_str_new(M, path_begin, p - path_begin));
       }
 
-#if MRUBY_RELEASE_MAJOR >= 3 && MRUBY_RELEASE_MINOR >= 3
       mrb_value const cnst = mrb_cv_get(M, mrb_obj_value(ret), cls);
-#else
-      mrb_value const cnst = mrb_mod_cv_get(M, ret, cls);
-#endif
       if (mrb_type(cnst) != MRB_TT_CLASS &&  mrb_type(cnst) != MRB_TT_MODULE) {
         mrb_raisef(M, mrb_class_get(M, "TypeError"), "%S does not refer to class/module",
                    mrb_str_new(M, path_begin, p - path_begin));
@@ -132,15 +124,9 @@ struct write_context : public utility {
   }
 
   write_context& version() {
-#if MRUBY_RELEASE_MAJOR >= 3 && MRUBY_RELEASE_MINOR >= 3
-    mrb_value const mod = mrb_obj_value(mrb_module_get(M, "Marshal"));
-    out_.byte(mrb_fixnum(mrb_cv_get(M, mod, mrb_intern_lit(M, "MAJOR_VERSION"))));
-    out_.byte(mrb_fixnum(mrb_cv_get(M, mod, mrb_intern_lit(M, "MINOR_VERSION"))));
-#else
     RClass* const mod = mrb_module_get(M, "Marshal");
-    out_.byte(mrb_fixnum(mrb_mod_cv_get(M, mod, mrb_intern_lit(M, "MAJOR_VERSION"))));
-    out_.byte(mrb_fixnum(mrb_mod_cv_get(M, mod, mrb_intern_lit(M, "MINOR_VERSION"))));
-#endif
+    out_.byte(mrb_fixnum(mrb_cv_get(M, mrb_obj_value(mod), mrb_intern_lit(M, "MAJOR_VERSION"))));
+    out_.byte(mrb_fixnum(mrb_cv_get(M, mrb_obj_value(mod), mrb_intern_lit(M, "MINOR_VERSION"))));
     return *this;
   }
 
@@ -275,7 +261,7 @@ write_context<Out>& write_context<Out>::marshal(mrb_value const& v, mrb_int limi
     return klass('u', v, false).string(mrb_funcall(M, v, "_dump", 1, mrb_nil_value()));
   }
 
-  mrb_value const iv_keys = mrb_obj_instance_variables(M, v);
+  mrb_value const iv_keys = mrb_funcall(M, v, "instance_variables", 0);
   mrb_funcall(M, iv_keys, "sort!", 0);
 
   if(mrb_type(v) != MRB_TT_OBJECT and cls != regexp_class and RARRAY_LEN(iv_keys) > 0) { tag('I'); }
