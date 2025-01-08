@@ -8,5 +8,5 @@ MRuby::Gem::Specification.new('mruby-marshal') do |spec|
   add_dependency 'mruby-struct', core: 'mruby-struct'
   add_dependency 'mruby-metaprog', core: 'mruby-metaprog' if Dir.exist? "#{MRUBY_ROOT}/mrbgems/mruby-metaprog"
 
-  add_test_dependency 'mruby-stringio', github: 'mrbgems/mruby-stringio', branch: 'ungetc'
+  add_test_dependency 'mruby-stringio', github: 'ksss/mruby-stringio'
 end
