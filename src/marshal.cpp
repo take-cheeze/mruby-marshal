@@ -773,7 +773,7 @@ void mrb_mruby_marshal_gem_init(mrb_state* M) {
 
   mrb_define_module_function(M, mod, "load", &marshal_load, MRB_ARGS_REQ(1));
   mrb_define_module_function(M, mod, "restore", &marshal_load, MRB_ARGS_REQ(1));
-  mrb_define_module_function(M, mod, "dump", &marshal_dump, MRB_ARGS_REQ(1));
+  mrb_define_module_function(M, mod, "dump", &marshal_dump, MRB_ARGS_ARG(1, 2));
 
   mrb_define_const(M, mod, "MAJOR_VERSION", mrb_fixnum_value(MAJOR_VERSION));
   mrb_define_const(M, mod, "MINOR_VERSION", mrb_fixnum_value(MINOR_VERSION));
