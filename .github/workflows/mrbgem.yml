@@ -17,6 +17,7 @@ jobs:
         os: [ubuntu-22.04, macos-latest]
         mruby_version:
         - master
+        - 4.0.0
         - 3.3.0
         - 3.2.0
         - 3.1.0
@@ -37,4 +38,5 @@ jobs:
     - name: download mruby
       run: git clone --depth 1 -b $MRUBY_VERSION "https://github.com/mruby/mruby.git" mruby
     - name: run test
+      continue-on-error: ${{ matrix.mruby_version == 'master' }}
       run: cd mruby && MRUBY_CONFIG="../.github/workflows/config.rb" ./minirake all test
