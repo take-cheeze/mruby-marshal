@@ -253,7 +253,11 @@ write_context<Out>& write_context<Out>::marshal(mrb_value const& v, mrb_int limi
 
   // check marshal_dump
   if(mrb_obj_respond_to(M, cls, mrb_intern_lit(M, "marshal_dump"))) {
-    return klass('U', v, false).marshal(mrb_funcall(M, v, "marshal_dump", 1, mrb_nil_value()), limit);
+    // marshal_dump takes no arguments (unlike marshal_load below, which takes
+    // the one dumped value back) -- this used to pass a stray nil, raising
+    // ArgumentError on any class defining a standards-conforming
+    // marshal_dump, such as a real VX Ace game's own Game_Interpreter.
+    return klass('U', v, false).marshal(mrb_funcall(M, v, "marshal_dump", 0), limit);
   }
   // check _dump
   if(mrb_obj_respond_to(M, cls, mrb_intern_lit(M, "_dump"))) {
@@ -546,8 +550,17 @@ mrb_value read_context<In>::marshal() {
 
     case 'U': { // marshal_load / marshal_dump defined class
       mrb_sym const cls = symbol();
-      ret = mrb_funcall(M, mrb_obj_value(path2class(cls)),
-                         "marshal_load", 1, marshal());
+      // Real Ruby's protocol: allocate a new instance *without* calling
+      // #initialize (Class#allocate, the same public entry point user code
+      // would reach for), then call the *instance* method
+      // #marshal_load(data) on it to restore state in place -- not a
+      // class-level factory method returning a fresh object. Marshal.load's
+      // own result is always this allocated-then-restored object, not
+      // whatever marshal_load itself happens to return.
+      mrb_value const obj = mrb_funcall(M, mrb_obj_value(path2class(cls)),
+                                         "allocate", 0);
+      mrb_funcall(M, obj, "marshal_load", 1, marshal());
+      ret = obj;
       register_link(id, ret);
       break;
     }
