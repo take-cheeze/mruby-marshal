@@ -56,9 +56,18 @@ namespace {
 enum { MAJOR_VERSION = 4, MINOR_VERSION = 8, };
 
 struct utility {
+  // Regexp is not a core class -- only mruby-onig-regexp (or another regexp
+  // gem) defines it, and psp/wio drop that gem outright (ADR 0098; nothing
+  // real ever needs it there, see that ADR's own reasoning). A hard
+  // mrb_class_get would turn every Marshal.dump/load on those targets into
+  // an immediate NameError, so this looks before it leaps: nullptr on a
+  // build with no Regexp class at all, which the one real use site below
+  // (a `cls == regexp_class` comparison) already treats correctly as "not a
+  // Regexp" since no live object's class pointer can ever be nullptr.
   utility(mrb_state* M)
-      : M(M), regexp_class(mrb_class_get(M, "Regexp"))
-      , symbols(mrb_ary_new(M)), objects(mrb_ary_new(M)) {}
+      : M(M),
+        regexp_class(mrb_class_defined(M, "Regexp") ? mrb_class_get(M, "Regexp") : nullptr),
+        symbols(mrb_ary_new(M)), objects(mrb_ary_new(M)) {}
   mrb_state* M;
 
   RClass* const regexp_class;
