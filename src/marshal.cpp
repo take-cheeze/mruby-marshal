@@ -331,8 +331,8 @@ write_context<Out>& write_context<Out>::marshal(mrb_value const& v, mrb_int limi
         auto meta = hash_marshal_meta(*this, limit);
         mrb_hash_foreach(M, RHASH(v), &marshal_hash_each, &meta);
 #elif MRUBY_RELEASE_MAJOR >= 2 && MRUBY_RELEASE_MINOR >= 0
+        // Insertion order, as CRuby writes a hash: sorting the keys failed for keys of different classes.
         mrb_value const keys = mrb_hash_keys(M, v);
-        mrb_funcall(M, keys, "sort!", 0);
 
         fixnum(RARRAY_LEN(keys));
         for(mrb_int i = 0; i < RARRAY_LEN(keys); ++i) {
