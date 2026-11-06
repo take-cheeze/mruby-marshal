@@ -660,7 +660,13 @@ mrb_value read_context<In>::marshal() {
         }
       }
 
-      ret = mrb_funcall_argv(M, mrb_obj_value(cls), mrb_intern_lit(M, "new"), member_count, RARRAY_PTR(values));
+      // Create the instance with no arguments, then set each member. Passing the values to new would fail for a struct
+      // made with keyword_init: true, which accepts only keyword arguments.
+      ret = mrb_funcall_argv(M, mrb_obj_value(cls), mrb_intern_lit(M, "new"), 0, NULL);
+      for (mrb_int i = 0; i < member_count; ++i) {
+        mrb_value const set_args[2] = { mrb_ary_ref(M, struct_symbols, i), mrb_ary_ref(M, values, i) };
+        mrb_funcall_argv(M, ret, mrb_intern_lit(M, "[]="), 2, set_args);
+      }
       register_link(id, ret);
       break;
     }
