@@ -641,33 +641,25 @@ mrb_value read_context<In>::marshal() {
                    "struct %S not compatible (struct size differs)", mrb_symbol_value(cls_name));
       }
 
-      mrb_value const symbols = mrb_ary_new_capa(M, member_count);
-      mrb_value const values = mrb_ary_new_capa(M, member_count);
+      // Create the instance with no arguments and register it before its members are read, as the dump numbers it
+      // before them (a link inside a member refers to the objects in that order). Passing the values to new would
+      // fail for a struct made with keyword_init: true, which accepts only keyword arguments.
+      ret = mrb_funcall_argv(M, mrb_obj_value(cls), mrb_intern_lit(M, "new"), 0, NULL);
+      register_link(id, ret);
 
       int const ai = mrb_gc_arena_save(M);
       for (mrb_int i = 0; i < member_count; ++i) {
-        mrb_ary_push(M, symbols, mrb_symbol_value(symbol()));
-        mrb_ary_push(M, values, marshal());
-        mrb_gc_arena_restore(M, ai);
-      }
-
-      for (mrb_int i = 0; i < member_count; ++i) {
-        mrb_value src_sym = mrb_ary_ref(M, symbols, i);
-        mrb_value dst_sym = mrb_ary_ref(M, struct_symbols, i);
+        mrb_sym const member = symbol();
+        mrb_value const src_sym = mrb_symbol_value(member);
+        mrb_value const dst_sym = mrb_ary_ref(M, struct_symbols, i);
         if (not mrb_obj_eq(M, src_sym, dst_sym)) {
           mrb_raisef(M, mrb_class_get(M, "TypeError"), "struct %S not compatible (:%S for :%S)",
                      mrb_symbol_value(cls_name), src_sym, dst_sym);
         }
-      }
-
-      // Create the instance with no arguments, then set each member. Passing the values to new would fail for a struct
-      // made with keyword_init: true, which accepts only keyword arguments.
-      ret = mrb_funcall_argv(M, mrb_obj_value(cls), mrb_intern_lit(M, "new"), 0, NULL);
-      for (mrb_int i = 0; i < member_count; ++i) {
-        mrb_value const set_args[2] = { mrb_ary_ref(M, struct_symbols, i), mrb_ary_ref(M, values, i) };
+        mrb_value const set_args[2] = { dst_sym, marshal() };
         mrb_funcall_argv(M, ret, mrb_intern_lit(M, "[]="), 2, set_args);
+        mrb_gc_arena_restore(M, ai);
       }
-      register_link(id, ret);
       break;
     }
 
