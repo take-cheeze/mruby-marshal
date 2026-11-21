@@ -245,3 +245,17 @@ assert 'marshal links among many objects' do
   assert_equal strings, again[0]
   assert_true again[1][0].equal?(again[0][-1])
 end
+
+assert 'marshal Integer wider than a fixnum' do
+  # CRuby's bytes: an Integer outside 31 bits is a bignum, an entry of the object table that no later one links to.
+  check_load_dump [2**40, -(2**40), 2**30, -(2**30), 2**30 - 1, 1, 2**40],
+                  "[\fl+\b\x00\x00\x00\x00\x00\x01l-\b\x00\x00\x00\x00\x00\x01l+\a\x00\x00\x00@" \
+                  "i\xFC\x00\x00\x00\xC0i\x04\xFF\xFF\xFF?i\x06l+\b\x00\x00\x00\x00\x00\x01"
+  check_load_dump 2**62 - 1, "l+\t\xFF\xFF\xFF\xFF\xFF\xFF\xFF?"
+
+  # A table of object_ids, which are pointers: the entries after one still load.
+  o = Object.new
+  table = { o.object_id => 'a', 1 => [o.object_id, 'b'] }
+  assert_equal table, Marshal.load(Marshal.dump(table))
+  assert_raise(RangeError) { load("l+\n\x00\x00\x00\x00\x00\x00\x00\x00\x01\x00") }
+end

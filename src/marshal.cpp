@@ -14,6 +14,7 @@ extern "C" {
 }
 #endif
 
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -146,6 +147,20 @@ struct write_context : public utility {
 
   write_context& tag(char t) { out_.byte(t); return *this; }
 
+  // 'l': the sign, the magnitude's length in 16-bit words, then its bytes from the least significant. The table gets
+  // an entry as CRuby gives the Bignum it writes one; no later Integer links to it, as none would in CRuby.
+  write_context& bignum(mrb_int const n) {
+    mrb_ary_push(M, objects, mrb_nil_value());
+    uint64_t mag = n < 0 ? 0 - static_cast<uint64_t>(n) : static_cast<uint64_t>(n);
+    char buf[sizeof(uint64_t)];
+    size_t len = 0;
+    for (; mag != 0; mag >>= 8) { buf[len++] = static_cast<char>(mag & 0xff); }
+    if (len % 2) { buf[len++] = 0; }
+    tag('l').tag(n < 0 ? '-' : '+').fixnum(static_cast<mrb_int>(len / 2));
+    out_.byte_array(buf, len);
+    return *this;
+  }
+
   write_context& fixnum(mrb_int const v) {
     if(v == 0) { out_.byte(0); return *this; }
     else if(0 < v and v < 123) { out_.byte(v + 5); return *this; }
@@ -263,7 +278,13 @@ write_context<Out>& write_context<Out>::marshal(mrb_value const& v, mrb_int limi
   switch(mrb_vtype(mrb_type(v))) {
     case MRB_TT_FALSE: return tag('F');
     case MRB_TT_TRUE : return tag('T');
-    case MRB_TT_FIXNUM: return tag('i').fixnum(mrb_fixnum(v));
+    case MRB_TT_FIXNUM: {
+      // The format's fixnum holds 31 bits; CRuby writes a wider Integer as a bignum, one entry of the object table.
+      // A length byte above 4 here was read back as a small number (mruby's object_id, a pointer, was one).
+      mrb_int const n = mrb_integer(v);
+      if (-(static_cast<mrb_int>(1) << 30) <= n and n < (static_cast<mrb_int>(1) << 30)) { return tag('i').fixnum(n); }
+      return bignum(n);
+    }
     case MRB_TT_SYMBOL: return symbol(mrb_symbol(v));
 
     default: break;
@@ -447,7 +468,7 @@ struct read_context : public utility {
   }
 
   void number_too_big() {
-    mrb_assert(false);
+    mrb_raise(M, mrb_class_get(M, "RangeError"), "marshaled number too big for Integer");
   }
 
   mrb_int fixnum() {
@@ -469,7 +490,7 @@ struct read_context : public utility {
       if(len > int(sizeof(mrb_int))) { number_too_big(); }
       mrb_int ret = ~0;
       for(mrb_int i = 0; i < len; ++i) {
-        ret &= ~(0xff << (8*i));
+        ret &= ~(static_cast<mrb_int>(0xff) << (8*i));
         ret |= static_cast<mrb_int>(in_.byte()) << (8*i);
       }
       return ret;
@@ -688,7 +709,24 @@ mrb_value read_context<In>::marshal() {
       break;
     }
 
-    case 'l': // bignum (unsupported)
+    case 'l': { // bignum: an Integer when it fits one
+      char const sign = static_cast<char>(in_.byte());
+      mrb_int const words = fixnum();
+      if (words < 0) { number_too_big(); }
+      uint64_t mag = 0;
+      for (mrb_int i = 0; i < words * 2; ++i) {
+        uint64_t const b = in_.byte();
+        if (b == 0) { continue; }
+        if (i >= static_cast<mrb_int>(sizeof(uint64_t))) { number_too_big(); }
+        mag |= b << (8 * i);
+      }
+      uint64_t const max = static_cast<uint64_t>(MRB_INT_MAX);
+      if (sign == '-' ? mag > max + 1 : mag > max) { number_too_big(); }
+      mrb_int const n = sign == '-' ? static_cast<mrb_int>(0 - mag) : static_cast<mrb_int>(mag);
+      register_link(id, ret = mrb_int_value(M, n));
+      break;
+    }
+
 
     default:
       mrb_raise(M, mrb_class_get(M, "TypeError"), "Unsupported type");
