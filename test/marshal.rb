@@ -269,8 +269,15 @@ assert 'marshal Struct whose new checks its arity' do
   assert_equal 1, again.a
   assert_equal [2], again.b
 
-  keyword = Struct.new(:a, :b, keyword_init: true)
-  Object.const_set(:MarshalKeywordPair, keyword)
-  again = Marshal.load(Marshal.dump(MarshalKeywordPair.new(a: 1, b: 2)))
-  assert_equal [1, 2], [again.a, again.b]
+  # keyword_init is mruby 3.4's; an older Struct.new takes the option Hash for a member name and raises.
+  keyword = begin
+    Struct.new(:a, :b, keyword_init: true)
+  rescue TypeError, ArgumentError
+    nil
+  end
+  if keyword
+    Object.const_set(:MarshalKeywordPair, keyword)
+    again = Marshal.load(Marshal.dump(MarshalKeywordPair.new(a: 1, b: 2)))
+    assert_equal [1, 2], [again.a, again.b]
+  end
 end
