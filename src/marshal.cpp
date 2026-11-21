@@ -676,10 +676,17 @@ mrb_value read_context<In>::marshal() {
                    "struct %S not compatible (struct size differs)", mrb_symbol_value(cls_name));
       }
 
-      // Create the instance with no arguments and register it before its members are read, as the dump numbers it
-      // before them (a link inside a member refers to the objects in that order). Passing the values to new would
-      // fail for a struct made with keyword_init: true, which accepts only keyword arguments.
-      ret = mrb_funcall_argv(M, mrb_obj_value(cls), mrb_intern_lit(M, "new"), 0, NULL);
+      // Create the instance with nil members and register it before its members are read, as the dump numbers it
+      // before them (a link inside a member refers to the objects in that order). The values cannot go to new yet; a
+      // struct made with keyword_init: true takes no positional arguments, and any other one gets a nil per member,
+      // as a new that checks its arity (one bc2cpp compiled, say) requires.
+      mrb_value const keyword_init = mrb_iv_get(M, mrb_obj_value(cls), mrb_intern_lit(M, "@__keyword_init__"));
+      mrb_value const nil_args = mrb_ary_new_capa(M, member_count);
+      if (not mrb_test(keyword_init)) {
+        for (mrb_int i = 0; i < member_count; ++i) { mrb_ary_push(M, nil_args, mrb_nil_value()); }
+      }
+      ret = mrb_funcall_argv(M, mrb_obj_value(cls), mrb_intern_lit(M, "new"), RARRAY_LEN(nil_args),
+                             RARRAY_PTR(nil_args));
       register_link(id, ret);
 
       int const ai = mrb_gc_arena_save(M);

@@ -259,3 +259,18 @@ assert 'marshal Integer wider than a fixnum' do
   assert_equal table, Marshal.load(Marshal.dump(table))
   assert_raise(RangeError) { load("l+\n\x00\x00\x00\x00\x00\x00\x00\x00\x01\x00") }
 end
+
+assert 'marshal Struct whose new checks its arity' do
+  strict = Struct.new(:a, :b) do
+    def initialize(a, b) super end
+  end
+  Object.const_set(:MarshalStrictPair, strict)
+  again = Marshal.load(Marshal.dump(MarshalStrictPair.new(1, [2])))
+  assert_equal 1, again.a
+  assert_equal [2], again.b
+
+  keyword = Struct.new(:a, :b, keyword_init: true)
+  Object.const_set(:MarshalKeywordPair, keyword)
+  again = Marshal.load(Marshal.dump(MarshalKeywordPair.new(a: 1, b: 2)))
+  assert_equal [1, 2], [again.a, again.b]
+end
