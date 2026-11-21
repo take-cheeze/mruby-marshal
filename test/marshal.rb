@@ -216,3 +216,68 @@ assert '#29' do
 
   check_load_dump MarshalTest.new, "o:\x10MarshalTest\b:\a@af\b0.1:\a@bf\b0.2:\a@cf\b0.3"
 end
+
+assert 'marshal_dump data takes the index after its object' do
+  class MarshalBag
+    attr_reader :items
+    def initialize(items = nil) @items = items end
+    def marshal_dump; @items end
+    def marshal_load(items) @items = items end
+  end
+
+  # CRuby's bytes for `x = "a"; b = MarshalBag.new([x]); [b, x, b]`: the Array b dumps as is entry 2, so the link to
+  # x is 3 and the one to b is 1.
+  loaded = load("[\bU:\x0FMarshalBag[\x06I\"\x06a\x06:\x06EF@\b@\x06")
+  assert_equal ['a'], loaded[0].items
+  assert_true loaded[1].equal?(loaded[0].items[0])
+  assert_true loaded[2].equal?(loaded[0])
+
+  x = 'a'
+  bag = MarshalBag.new([x])
+  again = Marshal.load(Marshal.dump([bag, x, bag]))
+  assert_true again[1].equal?(again[0].items[0])
+  assert_true again[2].equal?(again[0])
+end
+
+assert 'marshal links among many objects' do
+  strings = (0...5000).map { |i| "s#{i}" }
+  again = Marshal.load(Marshal.dump([strings, strings.reverse]))
+  assert_equal strings, again[0]
+  assert_true again[1][0].equal?(again[0][-1])
+end
+
+assert 'marshal Integer wider than a fixnum' do
+  # CRuby's bytes: an Integer outside 31 bits is a bignum, an entry of the object table that no later one links to.
+  check_load_dump [2**40, -(2**40), 2**30, -(2**30), 2**30 - 1, 1, 2**40],
+                  "[\fl+\b\x00\x00\x00\x00\x00\x01l-\b\x00\x00\x00\x00\x00\x01l+\a\x00\x00\x00@" \
+                  "i\xFC\x00\x00\x00\xC0i\x04\xFF\xFF\xFF?i\x06l+\b\x00\x00\x00\x00\x00\x01"
+  check_load_dump 2**62 - 1, "l+\t\xFF\xFF\xFF\xFF\xFF\xFF\xFF?"
+
+  # A table of object_ids, which are pointers: the entries after one still load.
+  o = Object.new
+  table = { o.object_id => 'a', 1 => [o.object_id, 'b'] }
+  assert_equal table, Marshal.load(Marshal.dump(table))
+  assert_raise(RangeError) { load("l+\n\x00\x00\x00\x00\x00\x00\x00\x00\x01\x00") }
+end
+
+assert 'marshal Struct whose new checks its arity' do
+  strict = Struct.new(:a, :b) do
+    def initialize(a, b) super end
+  end
+  Object.const_set(:MarshalStrictPair, strict)
+  again = Marshal.load(Marshal.dump(MarshalStrictPair.new(1, [2])))
+  assert_equal 1, again.a
+  assert_equal [2], again.b
+
+  # keyword_init is mruby 3.4's; an older Struct.new takes the option Hash for a member name and raises.
+  keyword = begin
+    Struct.new(:a, :b, keyword_init: true)
+  rescue TypeError, ArgumentError
+    nil
+  end
+  if keyword
+    Object.const_set(:MarshalKeywordPair, keyword)
+    again = Marshal.load(Marshal.dump(MarshalKeywordPair.new(a: 1, b: 2)))
+    assert_equal [1, 2], [again.a, again.b]
+  end
+end

@@ -14,8 +14,11 @@ extern "C" {
 }
 #endif
 
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+
+#include <unordered_map>
 
 #ifndef MRUBY_VERSION
 #define mrb_module_get mrb_class_get
@@ -119,17 +122,20 @@ struct write_context : public utility {
   typedef Out out_type;
   out_type out_;
 
-  write_context& symbol(mrb_sym const sym) {
-    size_t const len = RARRAY_LEN(symbols);
-    mrb_value const* const begin = RARRAY_PTR(symbols);
-    mrb_value const* ptr = begin;
-    for (; ptr < (begin + len) && *ptr != sym; ++ptr);
+  // The dump's symbol and object tables by key, so finding a link is a lookup, not a scan of every entry so far
+  // (which made a dump quadratic in its object count). Objects are keyed by mrb_obj_id, which is unique among the
+  // live objects `objects` keeps alive and agrees with mrb_obj_equal's identity for immediates.
+  std::unordered_map<mrb_sym, mrb_int> symbol_index;
+  std::unordered_map<mrb_int, mrb_int> object_index;
 
-    if(ptr == begin + len) { // define real symbol if not defined
+  write_context& symbol(mrb_sym const sym) {
+    auto const found = symbol_index.find(sym);
+    if(found == symbol_index.end()) { // define real symbol if not defined
+      symbol_index.emplace(sym, RARRAY_LEN(symbols));
       mrb_ary_push(M, symbols, mrb_symbol_value(sym));
       return tag(':').string(sym);
     }
-    else { return tag(';').fixnum(ptr - begin); } // write index to symbol table
+    else { return tag(';').fixnum(found->second); } // write index to symbol table
   }
 
   write_context& version() {
@@ -140,6 +146,20 @@ struct write_context : public utility {
   }
 
   write_context& tag(char t) { out_.byte(t); return *this; }
+
+  // 'l': the sign, the magnitude's length in 16-bit words, then its bytes from the least significant. The table gets
+  // an entry as CRuby gives the Bignum it writes one; no later Integer links to it, as none would in CRuby.
+  write_context& bignum(mrb_int const n) {
+    mrb_ary_push(M, objects, mrb_nil_value());
+    uint64_t mag = n < 0 ? 0 - static_cast<uint64_t>(n) : static_cast<uint64_t>(n);
+    char buf[sizeof(uint64_t)];
+    size_t len = 0;
+    for (; mag != 0; mag >>= 8) { buf[len++] = static_cast<char>(mag & 0xff); }
+    if (len % 2) { buf[len++] = 0; }
+    tag('l').tag(n < 0 ? '-' : '+').fixnum(static_cast<mrb_int>(len / 2));
+    out_.byte_array(buf, len);
+    return *this;
+  }
 
   write_context& fixnum(mrb_int const v) {
     if(v == 0) { out_.byte(0); return *this; }
@@ -239,11 +259,17 @@ write_context<Out>& write_context<Out>::marshal(mrb_value const& v, mrb_int limi
 
   // check for link
   {
-    mrb_value const *b = RARRAY_PTR(objects);
-    mrb_value const *l = b;
-    mrb_value const *e = b + RARRAY_LEN(objects);
-    for (; l < e && !mrb_obj_equal(M, *l, v); ++l);
-    if (l != e) return tag('@').fixnum(l - b);
+    auto const found = object_index.find(mrb_obj_id(v));
+    if (found != object_index.end() && mrb_obj_equal(M, RARRAY_PTR(objects)[found->second], v)) {
+      return tag('@').fixnum(found->second);
+    }
+    if (found != object_index.end()) { // an id two values share: the table, in full, is still the answer
+      mrb_value const *b = RARRAY_PTR(objects);
+      mrb_value const *l = b;
+      mrb_value const *e = b + RARRAY_LEN(objects);
+      for (; l < e && !mrb_obj_equal(M, *l, v); ++l);
+      if (l != e) return tag('@').fixnum(l - b);
+    }
   }
 
   RClass* const cls = mrb_obj_class(M, v);
@@ -252,12 +278,19 @@ write_context<Out>& write_context<Out>::marshal(mrb_value const& v, mrb_int limi
   switch(mrb_vtype(mrb_type(v))) {
     case MRB_TT_FALSE: return tag('F');
     case MRB_TT_TRUE : return tag('T');
-    case MRB_TT_FIXNUM: return tag('i').fixnum(mrb_fixnum(v));
+    case MRB_TT_FIXNUM: {
+      // The format's fixnum holds 31 bits; CRuby writes a wider Integer as a bignum, one entry of the object table.
+      // A length byte above 4 here was read back as a small number (mruby's object_id, a pointer, was one).
+      mrb_int const n = mrb_integer(v);
+      if (-(static_cast<mrb_int>(1) << 30) <= n and n < (static_cast<mrb_int>(1) << 30)) { return tag('i').fixnum(n); }
+      return bignum(n);
+    }
     case MRB_TT_SYMBOL: return symbol(mrb_symbol(v));
 
     default: break;
   }
 
+  object_index.emplace(mrb_obj_id(v), RARRAY_LEN(objects));
   mrb_ary_push(M, objects, v);
 
   // check marshal_dump
@@ -435,7 +468,7 @@ struct read_context : public utility {
   }
 
   void number_too_big() {
-    mrb_assert(false);
+    mrb_raise(M, mrb_class_get(M, "RangeError"), "marshaled number too big for Integer");
   }
 
   mrb_int fixnum() {
@@ -457,7 +490,7 @@ struct read_context : public utility {
       if(len > int(sizeof(mrb_int))) { number_too_big(); }
       mrb_int ret = ~0;
       for(mrb_int i = 0; i < len; ++i) {
-        ret &= ~(0xff << (8*i));
+        ret &= ~(static_cast<mrb_int>(0xff) << (8*i));
         ret |= static_cast<mrb_int>(in_.byte()) << (8*i);
       }
       return ret;
@@ -568,9 +601,11 @@ mrb_value read_context<In>::marshal() {
       // whatever marshal_load itself happens to return.
       mrb_value const obj = mrb_funcall(M, mrb_obj_value(path2class(cls)),
                                          "allocate", 0);
+      // Registered before its data is read, as CRuby does and as the dump numbered it: the data (the Array a Set
+      // dumps as, say) takes the next index, and a link inside it to this object resolves.
+      register_link(id, obj);
       mrb_funcall(M, obj, "marshal_load", 1, marshal());
       ret = obj;
-      register_link(id, ret);
       break;
     }
 
@@ -641,10 +676,17 @@ mrb_value read_context<In>::marshal() {
                    "struct %S not compatible (struct size differs)", mrb_symbol_value(cls_name));
       }
 
-      // Create the instance with no arguments and register it before its members are read, as the dump numbers it
-      // before them (a link inside a member refers to the objects in that order). Passing the values to new would
-      // fail for a struct made with keyword_init: true, which accepts only keyword arguments.
-      ret = mrb_funcall_argv(M, mrb_obj_value(cls), mrb_intern_lit(M, "new"), 0, NULL);
+      // Create the instance with nil members and register it before its members are read, as the dump numbers it
+      // before them (a link inside a member refers to the objects in that order). The values cannot go to new yet; a
+      // struct made with keyword_init: true takes no positional arguments, and any other one gets a nil per member,
+      // as a new that checks its arity (one bc2cpp compiled, say) requires.
+      mrb_value const keyword_init = mrb_iv_get(M, mrb_obj_value(cls), mrb_intern_lit(M, "@__keyword_init__"));
+      mrb_value const nil_args = mrb_ary_new_capa(M, member_count);
+      if (not mrb_test(keyword_init)) {
+        for (mrb_int i = 0; i < member_count; ++i) { mrb_ary_push(M, nil_args, mrb_nil_value()); }
+      }
+      ret = mrb_funcall_argv(M, mrb_obj_value(cls), mrb_intern_lit(M, "new"), RARRAY_LEN(nil_args),
+                             RARRAY_PTR(nil_args));
       register_link(id, ret);
 
       int const ai = mrb_gc_arena_save(M);
@@ -674,7 +716,24 @@ mrb_value read_context<In>::marshal() {
       break;
     }
 
-    case 'l': // bignum (unsupported)
+    case 'l': { // bignum: an Integer when it fits one
+      char const sign = static_cast<char>(in_.byte());
+      mrb_int const words = fixnum();
+      if (words < 0) { number_too_big(); }
+      uint64_t mag = 0;
+      for (mrb_int i = 0; i < words * 2; ++i) {
+        uint64_t const b = in_.byte();
+        if (b == 0) { continue; }
+        if (i >= static_cast<mrb_int>(sizeof(uint64_t))) { number_too_big(); }
+        mag |= b << (8 * i);
+      }
+      uint64_t const max = static_cast<uint64_t>(MRB_INT_MAX);
+      if (sign == '-' ? mag > max + 1 : mag > max) { number_too_big(); }
+      mrb_int const n = sign == '-' ? static_cast<mrb_int>(0 - mag) : static_cast<mrb_int>(mag);
+      register_link(id, ret = mrb_int_value(M, n));
+      break;
+    }
+
 
     default:
       mrb_raise(M, mrb_class_get(M, "TypeError"), "Unsupported type");
