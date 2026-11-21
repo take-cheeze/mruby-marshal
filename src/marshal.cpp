@@ -17,6 +17,8 @@ extern "C" {
 #include <stdlib.h>
 #include <string.h>
 
+#include <unordered_map>
+
 #ifndef MRUBY_VERSION
 #define mrb_module_get mrb_class_get
 #define mrb_args_int int
@@ -119,17 +121,20 @@ struct write_context : public utility {
   typedef Out out_type;
   out_type out_;
 
-  write_context& symbol(mrb_sym const sym) {
-    size_t const len = RARRAY_LEN(symbols);
-    mrb_value const* const begin = RARRAY_PTR(symbols);
-    mrb_value const* ptr = begin;
-    for (; ptr < (begin + len) && *ptr != sym; ++ptr);
+  // The dump's symbol and object tables by key, so finding a link is a lookup, not a scan of every entry so far
+  // (which made a dump quadratic in its object count). Objects are keyed by mrb_obj_id, which is unique among the
+  // live objects `objects` keeps alive and agrees with mrb_obj_equal's identity for immediates.
+  std::unordered_map<mrb_sym, mrb_int> symbol_index;
+  std::unordered_map<mrb_int, mrb_int> object_index;
 
-    if(ptr == begin + len) { // define real symbol if not defined
+  write_context& symbol(mrb_sym const sym) {
+    auto const found = symbol_index.find(sym);
+    if(found == symbol_index.end()) { // define real symbol if not defined
+      symbol_index.emplace(sym, RARRAY_LEN(symbols));
       mrb_ary_push(M, symbols, mrb_symbol_value(sym));
       return tag(':').string(sym);
     }
-    else { return tag(';').fixnum(ptr - begin); } // write index to symbol table
+    else { return tag(';').fixnum(found->second); } // write index to symbol table
   }
 
   write_context& version() {
@@ -239,11 +244,17 @@ write_context<Out>& write_context<Out>::marshal(mrb_value const& v, mrb_int limi
 
   // check for link
   {
-    mrb_value const *b = RARRAY_PTR(objects);
-    mrb_value const *l = b;
-    mrb_value const *e = b + RARRAY_LEN(objects);
-    for (; l < e && !mrb_obj_equal(M, *l, v); ++l);
-    if (l != e) return tag('@').fixnum(l - b);
+    auto const found = object_index.find(mrb_obj_id(v));
+    if (found != object_index.end() && mrb_obj_equal(M, RARRAY_PTR(objects)[found->second], v)) {
+      return tag('@').fixnum(found->second);
+    }
+    if (found != object_index.end()) { // an id two values share: the table, in full, is still the answer
+      mrb_value const *b = RARRAY_PTR(objects);
+      mrb_value const *l = b;
+      mrb_value const *e = b + RARRAY_LEN(objects);
+      for (; l < e && !mrb_obj_equal(M, *l, v); ++l);
+      if (l != e) return tag('@').fixnum(l - b);
+    }
   }
 
   RClass* const cls = mrb_obj_class(M, v);
@@ -258,6 +269,7 @@ write_context<Out>& write_context<Out>::marshal(mrb_value const& v, mrb_int limi
     default: break;
   }
 
+  object_index.emplace(mrb_obj_id(v), RARRAY_LEN(objects));
   mrb_ary_push(M, objects, v);
 
   // check marshal_dump
@@ -568,9 +580,11 @@ mrb_value read_context<In>::marshal() {
       // whatever marshal_load itself happens to return.
       mrb_value const obj = mrb_funcall(M, mrb_obj_value(path2class(cls)),
                                          "allocate", 0);
+      // Registered before its data is read, as CRuby does and as the dump numbered it: the data (the Array a Set
+      // dumps as, say) takes the next index, and a link inside it to this object resolves.
+      register_link(id, obj);
       mrb_funcall(M, obj, "marshal_load", 1, marshal());
       ret = obj;
-      register_link(id, ret);
       break;
     }
 

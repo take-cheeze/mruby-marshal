@@ -216,3 +216,32 @@ assert '#29' do
 
   check_load_dump MarshalTest.new, "o:\x10MarshalTest\b:\a@af\b0.1:\a@bf\b0.2:\a@cf\b0.3"
 end
+
+assert 'marshal_dump data takes the index after its object' do
+  class MarshalBag
+    attr_reader :items
+    def initialize(items = nil) @items = items end
+    def marshal_dump; @items end
+    def marshal_load(items) @items = items end
+  end
+
+  # CRuby's bytes for `x = "a"; b = MarshalBag.new([x]); [b, x, b]`: the Array b dumps as is entry 2, so the link to
+  # x is 3 and the one to b is 1.
+  loaded = load("[\bU:\x0FMarshalBag[\x06I\"\x06a\x06:\x06EF@\b@\x06")
+  assert_equal ['a'], loaded[0].items
+  assert_true loaded[1].equal?(loaded[0].items[0])
+  assert_true loaded[2].equal?(loaded[0])
+
+  x = 'a'
+  bag = MarshalBag.new([x])
+  again = Marshal.load(Marshal.dump([bag, x, bag]))
+  assert_true again[1].equal?(again[0].items[0])
+  assert_true again[2].equal?(again[0])
+end
+
+assert 'marshal links among many objects' do
+  strings = (0...5000).map { |i| "s#{i}" }
+  again = Marshal.load(Marshal.dump([strings, strings.reverse]))
+  assert_equal strings, again[0]
+  assert_true again[1][0].equal?(again[0][-1])
+end
