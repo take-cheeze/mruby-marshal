@@ -685,8 +685,11 @@ mrb_value read_context<In>::marshal() {
       if (not mrb_test(keyword_init)) {
         for (mrb_int i = 0; i < member_count; ++i) { mrb_ary_push(M, nil_args, mrb_nil_value()); }
       }
-      ret = mrb_funcall_argv(M, mrb_obj_value(cls), mrb_intern_lit(M, "new"), RARRAY_LEN(nil_args),
-                             RARRAY_PTR(nil_args));
+      // allocate, then initialize with the nils: a `new` given a computed argument list is a call bc2cpp's closed-world
+      // scan (ClosedWorld#native_superclass_names) cannot tell from Class.new(superclass), so it took this file for
+      // one that may subclass any class.
+      ret = mrb_funcall(M, mrb_obj_value(cls), "allocate", 0);
+      mrb_funcall_argv(M, ret, mrb_intern_lit(M, "initialize"), RARRAY_LEN(nil_args), RARRAY_PTR(nil_args));
       register_link(id, ret);
 
       int const ai = mrb_gc_arena_save(M);
